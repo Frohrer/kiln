@@ -4,7 +4,7 @@ const path = require("path");
 const { jobTimer } = require("./timing");
 const { processHistory } = require("./process-history");
 const EventEmitter = require("events");
-const StreamlitErrorMonitor = require("./streamlit-error-monitor");
+const StreamlitProcessMonitor = require("./streamlit-process-monitor");
 const { processOutputManager } = require("./process-output-manager");
 
 // Import the ProxyManager class (exported as a singleton in your code).
@@ -162,13 +162,12 @@ class WebEnabledJob extends Job {
                         throw error;
                     }
                 }
-                // Get the main file from the files array
+
                 const mainFile = this.files[0]?.name;
                 if (!mainFile) {
                     throw new Error("No file provided for Streamlit execution");
                 }
 
-                // Place the file first, then the Streamlit args
                 this.args = [mainFile, "--server.baseUrlPath", proxyInfo.path, "--server.port", this.webAppPort.toString()];
 
                 this.logger.debug(`Created proxy with port ${this.webAppPort} and path ${this.proxyPath}`);
@@ -176,22 +175,16 @@ class WebEnabledJob extends Job {
 
                 await this.setupStreamlitEnvironment(box);
 
-                // Create error monitor
-                const monitor = new StreamlitErrorMonitor(this);
+                // Create and set up process monitor
+                const monitor = new StreamlitProcessMonitor(this);
 
-                // Set up error collection
+                // Set up output collection
                 localEventBus.on("stdout", (data) => {
                     stdout += data.toString();
                 });
 
                 localEventBus.on("stderr", (data) => {
                     stderr += data.toString();
-                });
-
-                // Forward Streamlit errors to ProcessOutputManager
-                localEventBus.on("streamlit-error", (error) => {
-                    processOutputManager.addOutput(this.uuid, "error", JSON.stringify(error));
-                    this.logger.error(`Streamlit error: ${error.message}`);
                 });
 
                 try {
@@ -206,11 +199,12 @@ class WebEnabledJob extends Job {
                         22200000,
                         21600000,
                         this.memory_limits.run,
-                        localEventBus, { env: combinedEnv }
+                        localEventBus,
+                        { env: combinedEnv }
                     );
 
-                    // Monitor for startup and errors
-                    await monitor.monitorStreamlitOutput(localEventBus);
+                    // Monitor process with enhanced monitoring
+                    await monitor.monitorProcess(localEventBus);
 
                     return {
                         run: {
@@ -223,6 +217,7 @@ class WebEnabledJob extends Job {
                             message: "Streamlit server started",
                             status: "success",
                             webAppUrl: this.proxyPath,
+                            metrics: monitor.getMetrics()
                         },
                         language: this.runtime.language,
                         version: this.runtime.version.raw,

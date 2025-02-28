@@ -679,6 +679,49 @@ router.get("/process/:id/timing", (req, res) => {
     });
 });
 
+// Add new endpoint for process metrics
+router.get("/process/:id/metrics", async(req, res) => {
+    try {
+        const processId = req.params.id;
+        const process = runningProcesses.get(processId);
+        
+        if (!process) {
+            return res.status(404).json({
+                error: "Process not found"
+            });
+        }
+
+        // Get process metrics from ProcessOutputManager
+        const outputs = processOutputManager.getOutputs(processId);
+        
+        // Extract timing data
+        const timingData = outputs
+            .filter(output => output.type === "timing")
+            .map(output => JSON.parse(output.content));
+
+        // Extract error data
+        const errorData = outputs
+            .filter(output => output.type === "error")
+            .map(output => JSON.parse(output.content));
+
+        // Get the latest metrics
+        const latestTiming = timingData[timingData.length - 1] || null;
+        
+        return res.json({
+            process_id: processId,
+            status: process.status || "unknown",
+            metrics: latestTiming?.metrics || null,
+            errors: errorData,
+            timing_history: timingData
+        });
+    } catch (error) {
+        logger.error(`Error fetching process metrics: ${error}`);
+        return res.status(500).json({
+            error: "Failed to fetch process metrics"
+        });
+    }
+});
+
 setupMonitoringRoutes(router);
 
 module.exports = router;
