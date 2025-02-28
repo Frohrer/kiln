@@ -2,7 +2,7 @@ const EventEmitter = require("events");
 
 class ProcessOutputManager {
 	constructor() {
-		this.outputs = new Map(); // jobId -> {stdout: string[], stderr: string[], errors: string[], subscribers: Set}
+		this.outputs = new Map(); // jobId -> {stdout: string[], stderr: string[], errors: string[], timing: string[], subscribers: Set}
 		this.MAX_OUTPUT_LENGTH = 1000; // Maximum number of lines to keep in memory
 	}
 
@@ -11,7 +11,8 @@ class ProcessOutputManager {
 			this.outputs.set(jobId, {
 				stdout: [],
 				stderr: [],
-				errors: [], // Add errors array
+				errors: [],
+				timing: [], // Add timing array
 				subscribers: new Set(),
 				emitter: new EventEmitter(),
 			});
@@ -52,17 +53,13 @@ class ProcessOutputManager {
 		process.emitter.on("output", callback);
 
 		// Send existing output immediately
-		if (process.stdout.length > 0) {
-			callback({
-				type: "stdout",
-				data: process.stdout.join("\n"),
-			});
-		}
-		if (process.stderr.length > 0) {
-			callback({
-				type: "stderr",
-				data: process.stderr.join("\n"),
-			});
+		for (const type of ['stdout', 'stderr', 'timing', 'errors']) {
+			if (process[type] && process[type].length > 0) {
+				callback({
+					type,
+					data: process[type].join("\n"),
+				});
+			}
 		}
 
 		return () => {
@@ -79,7 +76,24 @@ class ProcessOutputManager {
 			stdout: process.stdout.join("\n"),
 			stderr: process.stderr.join("\n"),
 			errors: process.errors.join("\n"),
+			timing: process.timing.join("\n")
 		};
+	}
+
+	getOutputs(jobId) {
+		const process = this.outputs.get(jobId);
+		if (!process) return [];
+
+		const outputs = [];
+		for (const type of ['stdout', 'stderr', 'timing', 'errors']) {
+			if (process[type]) {
+				outputs.push(...process[type].map(content => ({
+					type,
+					content
+				})));
+			}
+		}
+		return outputs;
 	}
 
 	clearProcess(jobId) {
