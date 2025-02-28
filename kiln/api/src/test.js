@@ -2,6 +2,8 @@ const fetch = require("node-fetch");
 const config = require("./config");
 const Logger = require("logplease");
 const logger = Logger.create("selfcurl");
+const { Job } = require('./job');
+const { Runtime } = require('./runtime');
 
 async function selfCurl(endpoint, method = "POST", data = {}) {
 	const port = config.bind_address.split(":")[1];
@@ -104,5 +106,59 @@ async function test() {
 		logger.error("Code execution test failed:", error);
 	}
 }
+
+async function testPackageCaching() {
+	// Create a Python runtime
+	const runtime = new Runtime('python', '3.12.8');
+
+	// Test script that uses requests
+	const testCode = `
+import requests
+response = requests.get('https://httpbin.org/get')
+print(response.json())
+	`.trim();
+
+	// Create and run first job
+	console.log('First run - should install requests from PyPI:');
+	const job1 = new Job({
+		runtime,
+		files: [{ name: 'test.py', content: testCode }],
+		args: [],
+		stdin: '',
+		timeouts: { compile: 10000, run: 10000 },
+		cpu_times: { compile: 10000, run: 10000 },
+		memory_limits: { compile: -1, run: -1 },
+		dependencies: ['requests']
+	});
+
+	const box1 = await job1.prime();
+	const result1 = await job1.execute(box1);
+	console.log('First run output:', result1.run.stdout);
+	await job1.cleanup();
+
+	// Wait a bit
+	await new Promise(resolve => setTimeout(resolve, 1000));
+
+	// Create and run second job
+	console.log('\nSecond run - should use cached requests package:');
+	const job2 = new Job({
+		runtime,
+		files: [{ name: 'test.py', content: testCode }],
+		args: [],
+		stdin: '',
+		timeouts: { compile: 10000, run: 10000 },
+		cpu_times: { compile: 10000, run: 10000 },
+		memory_limits: { compile: -1, run: -1 },
+		dependencies: ['requests']
+	});
+
+	const box2 = await job2.prime();
+	const result2 = await job2.execute(box2);
+	console.log('Second run output:', result2.run.stdout);
+	await job2.cleanup();
+}
+
+// Run the test
+testPackageCaching().catch(console.error);
 
 module.exports = { test };

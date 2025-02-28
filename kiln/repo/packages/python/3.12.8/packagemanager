@@ -1,3 +1,11 @@
 #!/bin/bash
 
-pip3 "$@"
+# Configure pip to use the cache directory
+cat > /box/submission/.pip.conf << EOL
+[global]
+cache-dir = ${PIP_CACHE_DIR}
+target = ${PYTHONUSERBASE}/lib/python3.12/site-packages
+EOL
+
+# Install packages using pip with cache configuration
+pip3 --cache-dir="${PIP_CACHE_DIR}" --user "$@"

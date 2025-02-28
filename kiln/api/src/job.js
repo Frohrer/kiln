@@ -5,6 +5,7 @@ const path = require("path");
 const config = require("./config");
 const fs = require("fs/promises");
 const globals = require("./globals");
+const { sandboxPool } = require("./sandbox-pool");
 
 const job_states = {
     READY: Symbol("Ready to be primed"),
@@ -157,6 +158,9 @@ class Job {
         let cpu_time_stat = null;
         let wall_time_stat = null;
 
+        // Get package cache directory for the current runtime
+        const packageCacheDir = sandboxPool.getPackageCacheDir(this.runtime.language);
+
         const proc = cp.spawn(
             ISOLATE_PATH, [
                 "--run",
@@ -169,6 +173,7 @@ class Job {
                 "-e",
                 `--dir=${this.runtime.pkgdir}`,
                 `--dir=/etc:noexec`,
+                `--dir=${packageCacheDir}:rw`,  // Mount package cache directory with read-write access
                 `--processes=${this.runtime.max_process_count}`,
                 `--open-files=${this.runtime.max_open_files}`,
                 `--fsize=${Math.floor(this.runtime.max_file_size / 1000)}`,
@@ -185,6 +190,11 @@ class Job {
                 env: {
                     ...this.runtime.env_vars,
                     kiln_LANGUAGE: this.runtime.language,
+                    // Add environment variables for package caching
+                    PIP_CACHE_DIR: packageCacheDir,
+                    PYTHONUSERBASE: path.join(packageCacheDir, 'python'),
+                    NPM_CONFIG_CACHE: path.join(packageCacheDir, 'npm'),
+                    GOPATH: path.join(packageCacheDir, 'go'),
                 },
                 stdio: "pipe",
             }
@@ -311,44 +321,55 @@ class Job {
         };
     }
 
-    // async installDependencies(box, event_bus = null) {
-    // 	const packageInstallCommands = {
-    // 		python: (dependencies) => ["install", "--target=/box/submission", ...dependencies],
-    // 		node: (dependencies) => ["install", "--prefix", "/box/submission", ...dependencies],
-    // 		// Add other languages as needed
-    // 	};
+    async installDependencies(box, event_bus = null) {
+        if (!this.dependencies || this.dependencies.length === 0) {
+            this.logger.debug("No dependencies to install");
+            return { code: 0, status: "success" };
+        }
 
-    // 	const installCommandArgs = packageInstallCommands[this.runtime.language];
+        // Replace PIL with pillow if present for Python
+        if (this.runtime.language === "python") {
+            this.dependencies = this.dependencies.map(dep =>
+                dep.toLowerCase() === "pil" ? "pillow" : dep
+            );
+        }
 
-    // 	if (!installCommandArgs) {
-    // 		throw new Error(`Package installation not implemented for language ${this.runtime.language}`);
-    // 	}
+        const packageInstallCommands = {
+            python: (dependencies) => ["install", "--user", "--cache-dir=${PIP_CACHE_DIR}", ...dependencies],
+            node: (dependencies) => ["install", "--prefix", "/box/submission", "--cache=${NPM_CONFIG_CACHE}", ...dependencies],
+            go: (dependencies) => ["get", ...dependencies],
+        };
 
-    // 	const args = installCommandArgs(this.dependencies);
+        const installCommandArgs = packageInstallCommands[this.runtime.language];
 
-    // 	this.logger.info(`Running install command: packagemanager ${args.join(" ")}`);
+        if (!installCommandArgs) {
+            throw new Error(`Package installation not implemented for language ${this.runtime.language}`);
+        }
 
-    // 	// Run the install command inside the isolated environment
-    // 	const installResult = await this.safe_call(box, "packagemanager", args, this.timeouts.run, this.cpu_times.run, this.memory_limits.run, event_bus);
+        const args = installCommandArgs(this.dependencies);
 
-    // 	if (installResult.code !== 0) {
-    // 		this.logger.error(`Failed to install dependencies:`);
-    // 		this.logger.error(`stdout: ${installResult.stdout}`);
-    // 		this.logger.error(`stderr: ${installResult.stderr}`);
-    // 		this.logger.error(`message: ${installResult.message}`);
-    // 		if (event_bus) {
-    // 			event_bus.emit("exit", "install", {
-    // 				error: installResult.error,
-    // 				code: installResult.code,
-    // 				signal: installResult.signal,
-    // 			});
-    // 		}
-    // 		return installResult;
-    // 		// throw new Error(`Dependency installation failed with exit code ${installResult.code}`);
-    // 	}
+        this.logger.info(`Running install command: packagemanager ${args.join(" ")}`);
 
-    // 	this.logger.debug("Dependencies installed successfully");
-    // }
+        // Run the install command inside the isolated environment
+        const installResult = await this.safe_call(box, "packagemanager", args, this.timeouts.run, this.cpu_times.run, this.memory_limits.run, event_bus);
+
+        if (installResult.code !== 0) {
+            this.logger.error(`Failed to install dependencies:`);
+            this.logger.error(`stdout: ${installResult.stdout}`);
+            this.logger.error(`stderr: ${installResult.stderr}`);
+            this.logger.error(`message: ${installResult.message}`);
+            if (event_bus) {
+                event_bus.emit("exit", "install", {
+                    error: installResult.error,
+                    code: installResult.code,
+                    signal: installResult.signal,
+                });
+            }
+            return installResult;
+        }
+
+        this.logger.debug("Dependencies installed successfully");
+    }
 
     async execute(box, event_bus = null) {
         if (this.state !== job_states.PRIMED) {
