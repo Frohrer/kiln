@@ -1,164 +1,87 @@
-const fetch = require("node-fetch");
-const config = require("./config");
-const Logger = require("logplease");
-const logger = Logger.create("selfcurl");
-const { Job } = require('./job');
-const { Runtime } = require('./runtime');
+const http = require("http");
+const logger = require("logplease").create("test");
 
-async function selfCurl(endpoint, method = "POST", data = {}) {
-	const port = config.bind_address.split(":")[1];
-	const url = `http://localhost:${port}${endpoint}`;
-
-	try {
-		const response = await fetch(url, {
-			method: method,
+async function selfCurl(path, method = "GET", body = null) {
+	return new Promise((resolve, reject) => {
+		const options = {
+			hostname: "localhost",
+			port: 2000,
+			path,
+			method,
 			headers: {
 				"Content-Type": "application/json",
-				Accept: "*/*",
-				Origin: `http://localhost:${port}`,
 			},
-			body: JSON.stringify(data),
+		};
+
+		const req = http.request(options, (res) => {
+			let data = "";
+
+			res.on("data", (chunk) => {
+				data += chunk;
+			});
+
+			res.on("end", () => {
+				resolve({
+					status: res.statusCode,
+					data: JSON.parse(data),
+				});
+			});
 		});
 
-		return await response.json();
-	} catch (error) {
-		logger.error("Self-curl request failed:", error);
-		throw error;
-	}
+		req.on("error", (error) => {
+			reject(error);
+		});
+
+		if (body) {
+			req.write(JSON.stringify(body));
+		}
+
+		req.end();
+	});
 }
 
-async function test() {
-	logger.info("Waiting 10 seconds before starting tests...");
-	await new Promise((resolve) => setTimeout(resolve, 10000));
-	logger.info("Starting tests...");
-
-	// Test case 1: Install node package
+// Remove package-related tests
+async function main() {
 	try {
-		const result = await selfCurl("/api/v2/packages", "POST", {
-			language: "node",
-			version: "20.11.1",
-		});
-		logger.info("Package installation test result:", result);
-	} catch (error) {
-		logger.error("Package installation test failed:", error);
-	}
-
-	// Test case x: Install Streamlit 3.11.0
-	try {
-		const result = await selfCurl("/api/v2/packages", "POST", {
-			language: "streamlit",
-			version: "3.11.0",
-		});
-		logger.info("Package installation test result:", result);
-	} catch (error) {
-		logger.error("Package installation test failed:", error);
-	}
-
-	// Test case 2: Install Python 3.11.11
-	try {
-		const result = await selfCurl("/api/v2/packages", "POST", {
-			language: "python",
-			version: "3.11.11",
-		});
-		logger.info("Package installation test result:", result);
-	} catch (error) {
-		logger.error("Package installation test failed:", error);
-	}
-
-	// Test case 3: Install Python 3.12.8
-	try {
-		const result = await selfCurl("/api/v2/packages", "POST", {
-			language: "python",
-			version: "3.12.8",
-		});
-		logger.info("Package installation test result:", result);
-	} catch (error) {
-		logger.error("Package installation test failed:", error);
-	}
-
-	// Test case 4: Install Python 3.13.1
-	try {
-		const result = await selfCurl("/api/v2/packages", "POST", {
-			language: "python",
-			version: "3.13.1",
-		});
-		logger.info("Package installation test result:", result);
-	} catch (error) {
-		logger.error("Package installation test failed:", error);
-	}
-
-	// Test case 5: Execute code
-	try {
+		// Test execution endpoints
 		const result = await selfCurl("/api/v2/execute", "POST", {
 			language: "python",
-			version: "3.11.11",
+			version: "3.8",
+			files: [
+				{
+					name: "test.py",
+					content: 'print("Hello, World!")',
+				},
+			],
+		});
+
+		logger.info("Test execution result:", result);
+
+		// Test VM image endpoints
+		const imageResult = await selfCurl("/api/v2/images", "POST", {
+			language: "python",
+			version: "3.8",
 			files: [
 				{
 					name: "app.py",
-					content: "print('Try Royksopp!')",
+					content: 'print("Test VM")',
 				},
 			],
-			stdin: "",
-			args: [""],
 		});
-		logger.info("Code execution test result:", result);
+
+		logger.info("Test VM image creation:", imageResult);
+
+		// List images
+		const images = await selfCurl("/api/v2/images");
+		logger.info("Available images:", images);
+
+		process.exit(0);
 	} catch (error) {
-		logger.error("Code execution test failed:", error);
+		logger.error("Test failed:", error);
+		process.exit(1);
 	}
 }
 
-async function testPackageCaching() {
-	// Create a Python runtime
-	const runtime = new Runtime('python', '3.12.8');
-
-	// Test script that uses requests
-	const testCode = `
-import requests
-response = requests.get('https://httpbin.org/get')
-print(response.json())
-	`.trim();
-
-	// Create and run first job
-	console.log('First run - should install requests from PyPI:');
-	const job1 = new Job({
-		runtime,
-		files: [{ name: 'test.py', content: testCode }],
-		args: [],
-		stdin: '',
-		timeouts: { compile: 10000, run: 10000 },
-		cpu_times: { compile: 10000, run: 10000 },
-		memory_limits: { compile: -1, run: -1 },
-		dependencies: ['requests']
-	});
-
-	const box1 = await job1.prime();
-	const result1 = await job1.execute(box1);
-	console.log('First run output:', result1.run.stdout);
-	await job1.cleanup();
-
-	// Wait a bit
-	await new Promise(resolve => setTimeout(resolve, 1000));
-
-	// Create and run second job
-	console.log('\nSecond run - should use cached requests package:');
-	const job2 = new Job({
-		runtime,
-		files: [{ name: 'test.py', content: testCode }],
-		args: [],
-		stdin: '',
-		timeouts: { compile: 10000, run: 10000 },
-		cpu_times: { compile: 10000, run: 10000 },
-		memory_limits: { compile: -1, run: -1 },
-		dependencies: ['requests']
-	});
-
-	const box2 = await job2.prime();
-	const result2 = await job2.execute(box2);
-	console.log('Second run output:', result2.run.stdout);
-	await job2.cleanup();
+if (require.main === module) {
+	main();
 }
-
-// Run the test
-testPackageCaching().catch(console.error);
-
-module.exports = { test };

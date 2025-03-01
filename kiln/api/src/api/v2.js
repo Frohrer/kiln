@@ -4,7 +4,6 @@ const events = require("events");
 const { WebEnabledJob, runningProcesses } = require("../web-enabled-job");
 const { ProxyManager } = require("../proxy-handler");
 const runtime = require("../runtime");
-const package = require("../package");
 const globals = require("../globals");
 const logger = require("logplease").create("api/v2");
 const { jobTimer } = require("../timing");
@@ -587,79 +586,6 @@ router.get("/runtimes", (req, res) => {
     });
 
     return res.status(200).send(runtimes);
-});
-
-router.get("/packages", async(req, res) => {
-    logger.debug("Request to list packages");
-    let packages = await package.get_package_list();
-
-    packages = packages.map((pkg) => {
-        return {
-            language: pkg.language,
-            language_version: pkg.version.raw,
-            installed: pkg.installed,
-        };
-    });
-
-    return res.status(200).send(packages);
-});
-
-router.post("/packages", async(req, res) => {
-    logger.debug("Request to install package");
-
-    let { language, version } = req.body;
-
-    const pkg = await package.get_package(language, version);
-
-    if (pkg == null) {
-        return res.status(404).send({
-            message: `Requested package ${language}-${version} does not exist`,
-        });
-    }
-
-    try {
-        const response = await pkg.install();
-
-        return res.status(200).send(response);
-    } catch (e) {
-        logger.error(`Error while installing package ${pkg.language}-${pkg.version.raw}:`, e.message);
-
-        if (e.message && e.message === "Already installed") {
-            return res.status(409).send({
-                message: e.message,
-            });
-        }
-
-        return res.status(500).send({
-            message: e.message,
-        });
-    }
-});
-
-router.delete("/packages", async(req, res) => {
-    logger.debug("Request to uninstall package");
-
-    const { language, version } = req.body;
-
-    const pkg = await package.get_package(language, version);
-
-    if (pkg == null) {
-        return res.status(404).send({
-            message: `Requested package ${language}-${version} does not exist`,
-        });
-    }
-
-    try {
-        const response = await pkg.uninstall();
-
-        return res.status(200).send(response);
-    } catch (e) {
-        logger.error(`Error while uninstalling package ${pkg.language}-${pkg.version}:`, e.message);
-
-        return res.status(500).send({
-            message: e.message,
-        });
-    }
 });
 
 router.get("/process/:id/timing", (req, res) => {
