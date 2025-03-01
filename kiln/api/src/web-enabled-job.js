@@ -6,6 +6,7 @@ const { processHistory } = require("./process-history");
 const EventEmitter = require("events");
 const StreamlitProcessMonitor = require("./streamlit-process-monitor");
 const { processOutputManager } = require("./process-output-manager");
+const firecrackerService = require("./firecracker-service");
 
 // Import the ProxyManager class (exported as a singleton in your code).
 const ProxyManager = require("./proxy-handler");
@@ -40,13 +41,13 @@ class WebEnabledJob extends Job {
         this.proxyPath = null;
         this.additionalEnvVars = {};
         this.processPromise = null;
+        this.vmId = null;
 
         jobTimer.startTiming(this.uuid);
-
         runningProcesses.set(this.uuid, this);
     }
 
-    async installDependencies(box, event_bus = null) {
+    async installDependencies(vmId, event_bus = null) {
         if (!this.dependencies || this.dependencies.length === 0) {
             this.logger.debug("No dependencies to install after filtering");
             return { code: 0, status: "success" };
@@ -60,39 +61,38 @@ class WebEnabledJob extends Job {
         }
 
         const packageInstallCommands = {
-            python: (dependencies) => ["--disable-pip-version-check", "install", "--target=/box/submission", ...dependencies],
-            streamlit: (dependencies) => ["--disable-pip-version-check", "install", "--target=/box/submission", ...dependencies],
-            javascript: (dependencies) => ["install", "--prefix", "/box/submission", ...dependencies],
+            python: (dependencies) => `pip install ${dependencies.join(" ")}`,
+            streamlit: (dependencies) => `pip install ${dependencies.join(" ")}`,
+            javascript: (dependencies) => `npm install ${dependencies.join(" ")}`,
         };
 
-        const installCommandArgs = packageInstallCommands[this.runtime.language];
+        const installCommand = packageInstallCommands[this.runtime.language];
 
-        if (!installCommandArgs) {
+        if (!installCommand) {
             throw new Error(`Package installation not implemented for language ${this.runtime.language}`);
         }
 
-        const args = installCommandArgs(this.dependencies);
+        const command = installCommand(this.dependencies);
+        this.logger.info(`Running install command: ${command}`);
 
-        this.logger.info(`Running install command for ${this.runtime.language} (using ${this.runtime.language} package manager): packagemanager ${args.join(" ")}`);
+        const result = await firecrackerService.executeInVM(vmId, command);
 
-        const installResult = await this.safe_call(box, "packagemanager", args, this.timeouts.run, this.cpu_times.run, this.memory_limits.run, event_bus);
-
-        if (installResult.code !== 0) {
+        if (result.exitCode !== 0) {
             this.logger.error(`Failed to install dependencies:`);
-            this.logger.error(`stdout: ${installResult.stdout}`);
-            this.logger.error(`stderr: ${installResult.stderr}`);
-            this.logger.error(`message: ${installResult.message}`);
+            this.logger.error(`stdout: ${result.stdout}`);
+            this.logger.error(`stderr: ${result.stderr}`);
             if (event_bus) {
                 event_bus.emit("exit", "install", {
-                    error: installResult.error,
-                    code: installResult.code,
-                    signal: installResult.signal,
+                    error: result.stderr,
+                    code: result.exitCode,
+                    signal: null,
                 });
             }
-            return installResult;
+            return result;
         }
 
         this.logger.debug("Dependencies installed successfully");
+        return { code: 0, status: "success" };
     }
 
     waitForStreamlitServer(event_bus) {
@@ -138,6 +138,18 @@ class WebEnabledJob extends Job {
         let stage = "execute";
 
         try {
+            // Build VM image with the code
+            const imageId = `${this.runtime.language}-${this.runtime.version.raw}-${this.uuid}`;
+            await firecrackerService.buildImage(this.runtime.language, this.runtime.version.raw, this.files);
+
+            // Start VM
+            const vmConfig = {
+                memory_limit: this.memory_limits.run,
+                cpu_count: 1
+            };
+            const { vmId } = await firecrackerService.startVM(imageId, vmConfig);
+            this.vmId = vmId;
+
             const combinedEnv = {
                 ...this.runtime.env_vars,
                 ...this.additionalEnvVars,
@@ -152,7 +164,7 @@ class WebEnabledJob extends Job {
                 if (this.dependencies && this.dependencies.length > 0) {
                     stage = "install";
                     this.logger.debug(`Installing additional Python dependencies for Streamlit: ${this.dependencies.join(", ")}`);
-                    const installResult = await this.installDependencies(box, localEventBus);
+                    const installResult = await this.installDependencies(vmId, localEventBus);
                     if (installResult && installResult.code !== 0) {
                         const error = new Error("Failed to install dependencies");
                         error.stage = "install";
@@ -173,7 +185,7 @@ class WebEnabledJob extends Job {
                 this.logger.debug(`Created proxy with port ${this.webAppPort} and path ${this.proxyPath}`);
                 this.logger.debug(`Streamlit args: ${this.args.join(" ")}`);
 
-                await this.setupStreamlitEnvironment(box);
+                await this.setupStreamlitEnvironment(vmId);
 
                 // Create and set up process monitor
                 const monitor = new StreamlitProcessMonitor(this);
@@ -191,28 +203,20 @@ class WebEnabledJob extends Job {
                     stage = "execute";
                     this.logger.debug("Starting Streamlit process");
                     
-                    // Start the process
-                    this.processPromise = this.safe_call(
-                        box,
-                        "run",
-                        this.args,
-                        22200000,
-                        21600000,
-                        this.memory_limits.run,
-                        localEventBus,
-                        { env: combinedEnv }
-                    );
+                    // Start the process in VM
+                    const command = `cd /app && streamlit run ${this.args.join(" ")}`;
+                    const result = await firecrackerService.executeInVM(vmId, command);
 
                     // Monitor process with enhanced monitoring
                     await monitor.monitorProcess(localEventBus);
 
                     return {
                         run: {
-                            code: 0,
+                            code: result.exitCode,
                             signal: null,
-                            stdout,
-                            stderr,
-                            output: stdout + stderr,
+                            stdout: result.stdout,
+                            stderr: result.stderr,
+                            output: result.stdout + result.stderr,
                             memory: null,
                             message: "Streamlit server started",
                             status: "success",
@@ -234,133 +238,114 @@ class WebEnabledJob extends Job {
                 }
             }
 
-            // For non-Streamlit jobs, run the parent execute method
-            const result = await super.execute(box, localEventBus);
-
-            // Update metrics for all jobs
-            if (result.run) {
-                jobTimer.updateMetrics(this.uuid, {
-                    cpuTime: result.run.cpu_time,
-                    wallTime: result.run.wall_time,
-                    memory: result.run.memory,
-                });
+            // For non-Streamlit jobs
+            if (this.dependencies && this.dependencies.length > 0) {
+                stage = "install";
+                const installResult = await this.installDependencies(vmId, localEventBus);
+                if (installResult && installResult.code !== 0) {
+                    const error = new Error("Failed to install dependencies");
+                    error.stage = "install";
+                    error.code = installResult.code;
+                    error.stdout = installResult.stdout;
+                    error.stderr = installResult.stderr;
+                    throw error;
+                }
             }
+
+            // Execute the code in VM
+            stage = "execute";
+            const mainFile = this.files[0]?.name;
+            const command = `cd /app && ${this.runtime.command} ${mainFile} ${this.args.join(" ")}`;
+            const result = await firecrackerService.executeInVM(vmId, command);
+
+            // Update metrics
+            jobTimer.updateMetrics(this.uuid, {
+                cpuTime: result.cpuTime,
+                wallTime: result.wallTime,
+                memory: result.memory,
+            });
 
             // Add to process history
             processHistory.addProcess(this.uuid, {
                 language: this.runtime.language,
                 version: this.runtime.version.raw,
-                startTime: new Date(this.startTime),
-                status: result.run?.code === 0 ? "completed" : "failed",
+                startTime: Date.now(),
+                status: "completed",
                 timing: jobTimer.getTimingReport(this.uuid),
-                result: result,
             });
 
-            return result;
-        } catch (error) {
-            // Enhance error with additional context
-            error.stage = stage;
-            error.stdout = stdout;
-            error.stderr = stderr;
-            error.language = this.runtime.language;
-            error.version = this.runtime.version.raw;
-            
-            // Record failed process with detailed error information
-            processHistory.addProcess(this.uuid, {
+            return {
+                run: {
+                    code: result.exitCode,
+                    signal: null,
+                    stdout: result.stdout,
+                    stderr: result.stderr,
+                    output: result.stdout + result.stderr,
+                    memory: result.memory,
+                    message: result.exitCode === 0 ? "Success" : "Failed",
+                    status: result.exitCode === 0 ? "success" : "error",
+                },
                 language: this.runtime.language,
                 version: this.runtime.version.raw,
-                startTime: new Date(this.startTime),
-                status: "failed",
-                timing: jobTimer.getTimingReport(this.uuid),
-                error: {
-                    message: error.message,
-                    stage: error.stage,
-                    stdout: error.stdout,
-                    stderr: error.stderr
-                }
-            });
+            };
 
-            throw error;
-        } finally {
-            jobTimer.endStage(this.uuid);
+        } catch (error) {
+            this.logger.error(`Error in ${stage} stage:`, error);
+            throw {
+                stage,
+                error: error.message,
+                stdout,
+                stderr,
+                code: error.code || 1,
+            };
         }
     }
 
     async terminate() {
-        this.logger.info("Terminating job");
-
-        // First kill any running process
-        if (this.process) {
+        if (this.vmId) {
             try {
-                process.kill(this.process.pid, "SIGKILL");
-                // Wait for process to actually terminate
-                await new Promise((resolve) => setTimeout(resolve, 1000));
+                await firecrackerService.stopVM(this.vmId);
             } catch (error) {
-                this.logger.error(`Error killing process: ${error.message}`);
+                this.logger.error(`Error stopping VM ${this.vmId}:`, error);
             }
         }
 
-        // Remove proxy before cleanup
         if (this.proxyPath) {
-            this.logger.debug(`Cleaning up proxy for port ${this.webAppPort}`);
             proxyManager.removeProxy(this.uuid);
         }
 
-        // Wait for any ongoing isolate operations
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-
-        try {
-            await super.cleanup();
-        } catch (error) {
-            this.logger.error(`Error in cleanup: ${error.message}`);
-            // Force cleanup for each box
-            const boxIds = this.getBoxIds();
-            for (const boxId of boxIds) {
-                await this.forceCleanupBox(boxId);
-            }
-        }
-
-        // End timing and get final report
-        const timingReport = jobTimer.endTiming(this.uuid);
-        this.logger.debug("Job timing report:", timingReport);
-
-        // Save to history before removing from running processes
-        processHistory.addProcess(this.uuid, {
-            language: this.runtime.language,
-            version: this.runtime.version.raw,
-            startTime: new Date(this.startTime),
-            status: "terminated",
-            timing: timingReport,
-        });
-
         runningProcesses.delete(this.uuid);
+        jobTimer.cleanup(this.uuid);
     }
 
     async cleanup() {
-        // If the runtime is not streamlit or there's no running process, remove the proxy if it exists
-        if (this.runtime.language !== "streamlit" || !this.processPromise) {
-            if (this.webAppPort) {
-                this.logger.debug(`Cleaning up proxy for port ${this.webAppPort}`);
-                proxyManager.removeProxy(this.uuid);
-            }
-            await super.cleanup();
+        await this.terminate();
+        
+        // Remove the VM image
+        const imageId = `${this.runtime.language}-${this.runtime.version.raw}-${this.uuid}`;
+        try {
+            await firecrackerService.removeImage(imageId);
+        } catch (error) {
+            this.logger.error(`Error removing image ${imageId}:`, error);
         }
     }
 
-    async setupStreamlitEnvironment(box) {
-        const homeDir = path.join(box.dir, "submission", "home");
-        await fs.mkdir(homeDir, { recursive: true });
-
-        this.additionalEnvVars = {
-            HOME: "/box/submission/home",
-            PORT: this.webAppPort.toString(),
-        };
+    async setupStreamlitEnvironment(vmId) {
+        // Install Streamlit in VM
+        const command = "pip install streamlit";
+        const result = await firecrackerService.executeInVM(vmId, command);
+        
+        if (result.exitCode !== 0) {
+            throw new Error(`Failed to install Streamlit: ${result.stderr}`);
+        }
     }
 
     isWebApp() {
-        const webFrameworks = ["flask", "dash", "gradio"];
-        return this.files.some((file) => webFrameworks.some((framework) => file.content.includes(`import ${framework}`) || file.content.includes(`from ${framework}`)));
+        return this.runtime.language === "streamlit";
     }
 }
 
-module.exports = { WebEnabledJob, runningProcesses };
+module.exports = {
+    WebEnabledJob,
+    runningProcesses,
+};

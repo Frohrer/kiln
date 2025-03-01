@@ -1,78 +1,40 @@
-const { EventEmitter } = require("events");
+const cp = require("child_process");
+const logger = require("logplease").create("port-detector");
 
-class PortDetector extends EventEmitter {
-	constructor(box) {
-		super();
-		this.box = box;
-		this.initialPorts = new Set();
-		this.detectedPorts = new Set();
-		this.isMonitoring = false;
+class PortDetector {
+	constructor() {
+		this.logger = logger;
 	}
 
-	async listListeningPorts() {
-		// Run netstat inside the isolate box to detect listening ports
-		const result = await this.box.safe_call(
-			this.box,
-			"netstat",
-			["-tunlp"],
-			5000, // Short timeout
-			5000, // Short CPU time
-			128 * 1024 * 1024, // 128MB memory limit
-			null
-		);
+	async detectPort(vmId) {
+		try {
+			// Run netstat inside the VM to detect listening ports
+			const result = await new Promise((resolve, reject) => {
+				cp.exec(`netstat -tlpn`, (error, stdout, stderr) => {
+					if (error) {
+						reject(error);
+						return;
+					}
+					resolve(stdout);
+				});
+			});
 
-		if (result.code !== 0) {
-			// Handle case where netstat might not be available
-			return [];
-		}
-
-		const ports = [];
-		const lines = result.stdout.split("\n");
-		for (const line of lines) {
-			if (line.includes("LISTEN")) {
-				// Parse lines like: "tcp 0 0 0.0.0.0:8501 0.0.0.0:* LISTEN 123/python"
-				const match = line.match(/0\.0\.0\.0:(\d+)/);
-				if (match) {
-					const port = parseInt(match[1], 10);
-					if (!isNaN(port)) {
-						ports.push(port);
+			// Parse netstat output to find listening ports
+			const lines = result.split("\n");
+			for (const line of lines) {
+				if (line.includes("LISTEN")) {
+					const parts = line.trim().split(/\s+/);
+					const address = parts[3];
+					if (address.endsWith(":80") || address.endsWith(":8000") || address.endsWith(":8080")) {
+						return parseInt(address.split(":").pop());
 					}
 				}
 			}
+		} catch (error) {
+			this.logger.error(`Error detecting port: ${error}`);
 		}
-		return ports;
-	}
-
-	async detectNewPort(timeoutMs = 30000) {
-		const startTime = Date.now();
-		const pollInterval = 1000; // Poll every second
-
-		// Get initial state of ports
-		this.initialPorts = new Set(await this.listListeningPorts());
-
-		while (Date.now() - startTime < timeoutMs) {
-			await new Promise((resolve) => setTimeout(resolve, pollInterval));
-
-			const currentPorts = await this.listListeningPorts();
-
-			// Look for new ports that weren't in the initial set
-			for (const port of currentPorts) {
-				if (!this.initialPorts.has(port) && !this.detectedPorts.has(port)) {
-					this.detectedPorts.add(port);
-					this.emit("port-opened", port);
-					return port;
-				}
-			}
-		}
-
-		throw new Error("Timeout waiting for port to open");
-	}
-
-	async cleanup() {
-		this.initialPorts.clear();
-		this.detectedPorts.clear();
-		this.isMonitoring = false;
+		return null;
 	}
 }
 
-module.exports = PortDetector;
+module.exports = new PortDetector();

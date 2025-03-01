@@ -1,25 +1,15 @@
 #!/bin/bash
 
-# Setup cgroup v2 if available, otherwise fallback to v1
-if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
-    # cgroup v2
-    echo "Setting up cgroup v2"
-    mkdir -p /sys/fs/cgroup/isolate
-    echo "+cpu +cpuset +memory +pids" > /sys/fs/cgroup/cgroup.subtree_control
-else
-    # cgroup v1 fallback
-    echo "Setting up cgroup v1"
-    for subsys in cpuset cpu memory pids; do
-        mkdir -p /sys/fs/cgroup/$subsys/isolate
-        echo 1 > /sys/fs/cgroup/$subsys/isolate/tasks
-    done
+# Setup KVM
+if [ ! -e /dev/kvm ]; then
+    mknod /dev/kvm c 10 232
 fi
 
-# Ensure correct permissions
-chown -R kiln:kiln /kiln
+# Setup network for Firecracker
+ip tuntap add tap0 mode tap
+ip addr add 172.16.0.1/24 dev tap0
+ip link set tap0 up
 
-# Set file descriptor limit
-ulimit -n 65536
-
-# Start API as kiln user
-exec su -- kiln -c 'node /kiln_api/src'
+# Start the API server
+cd /kiln_api
+exec node src/index.js

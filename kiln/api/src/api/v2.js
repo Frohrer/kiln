@@ -12,6 +12,9 @@ const { processHistory } = require("../process-history");
 const { pipIgnore } = require("../pip_ignore");
 const { setupMonitoringRoutes, trackExecution } = require("../monitoring");
 const { processOutputManager } = require("../process-output-manager");
+const firecrackerService = require("../firecracker-service");
+const fs = require("fs");
+const path = require("path");
 
 function getDependencies(code, language) {
     let dependencies = [];
@@ -718,6 +721,72 @@ router.get("/process/:id/metrics", async(req, res) => {
         logger.error(`Error fetching process metrics: ${error}`);
         return res.status(500).json({
             error: "Failed to fetch process metrics"
+        });
+    }
+});
+
+// Add new routes for Firecracker image management
+router.post("/images", async(req, res) => {
+    const { language, version, files } = req.body;
+
+    if (!language || !version || !files) {
+        return res.status(400).json({
+            message: "language, version, and files are required"
+        });
+    }
+
+    try {
+        const result = await firecrackerService.buildImage(language, version, files);
+        return res.status(200).json(result);
+    } catch (error) {
+        logger.error(`Error building image: ${error}`);
+        return res.status(500).json({
+            message: "Failed to build image",
+            error: error.message
+        });
+    }
+});
+
+router.delete("/images/:imageId", async(req, res) => {
+    const { imageId } = req.params;
+
+    try {
+        const result = await firecrackerService.removeImage(imageId);
+        if (result) {
+            return res.status(200).json({
+                message: `Image ${imageId} removed successfully`
+            });
+        } else {
+            return res.status(404).json({
+                message: `Image ${imageId} not found`
+            });
+        }
+    } catch (error) {
+        logger.error(`Error removing image: ${error}`);
+        return res.status(500).json({
+            message: "Failed to remove image",
+            error: error.message
+        });
+    }
+});
+
+router.get("/images", async(req, res) => {
+    try {
+        const images = fs.readdirSync(firecrackerService.imagesDir)
+            .filter(file => file.endsWith('.ext4'))
+            .map(file => ({
+                imageId: path.basename(file, '.ext4'),
+                path: path.join(firecrackerService.imagesDir, file)
+            }));
+
+        return res.status(200).json({
+            images
+        });
+    } catch (error) {
+        logger.error(`Error listing images: ${error}`);
+        return res.status(500).json({
+            message: "Failed to list images",
+            error: error.message
         });
     }
 });
