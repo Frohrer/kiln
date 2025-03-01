@@ -40,10 +40,28 @@ async function selfCurl(path, method = "GET", body = null) {
 	});
 }
 
-// Rename main to test and export it
 async function test() {
 	try {
-		// Test execution endpoints
+		// First create Python runtime image
+		logger.info("Creating Python runtime image...");
+		const pythonImage = await selfCurl("/api/v2/images", "POST", {
+			language: "python",
+			version: "3.8",
+			files: [
+				{
+					name: "requirements.txt",
+					content: "# Base Python requirements\n"
+				}
+			]
+		});
+
+		logger.info("Python runtime image creation result:", pythonImage);
+
+		// Wait a bit for the image to be ready
+		await new Promise(resolve => setTimeout(resolve, 5000));
+
+		// Now test execution
+		logger.info("Testing code execution...");
 		const result = await selfCurl("/api/v2/execute", "POST", {
 			language: "python",
 			version: "3.8",
@@ -56,20 +74,6 @@ async function test() {
 		});
 
 		logger.info("Test execution result:", result);
-
-		// Test VM image endpoints
-		const imageResult = await selfCurl("/api/v2/images", "POST", {
-			language: "python",
-			version: "3.8",
-			files: [
-				{
-					name: "app.py",
-					content: 'print("Test VM")',
-				},
-			],
-		});
-
-		logger.info("Test VM image creation:", imageResult);
 
 		// List images
 		const images = await selfCurl("/api/v2/images");
