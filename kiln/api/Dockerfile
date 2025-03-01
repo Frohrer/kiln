@@ -8,7 +8,7 @@ RUN apt-get update && \
     libncurses6 libncurses5 libedit-dev libseccomp-dev rename procps python3 \
     libreadline-dev libblas-dev liblapack-dev libpcre3-dev libarpack2-dev \
     libfftw3-dev libglpk-dev libqhull-dev libqrupdate-dev libsuitesparse-dev \
-    libsundials-dev libpcre2-dev libcap-dev curl wget && \
+    libsundials-dev libpcre2-dev libcap-dev curl wget iproute2 && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Firecracker

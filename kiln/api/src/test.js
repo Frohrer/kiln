@@ -40,8 +40,8 @@ async function selfCurl(path, method = "GET", body = null) {
 	});
 }
 
-// Remove package-related tests
-async function main() {
+// Rename main to test and export it
+async function test() {
 	try {
 		// Test execution endpoints
 		const result = await selfCurl("/api/v2/execute", "POST", {
@@ -82,6 +82,10 @@ async function main() {
 	}
 }
 
+// Export the test function
+module.exports = { test };
+
+// Run test if this is the main module
 if (require.main === module) {
-	main();
+	test();
 }
