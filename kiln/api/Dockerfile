@@ -37,7 +37,7 @@ RUN set -e && \
     mkdir -p /kiln && \
     # Download kernel
     wget --progress=dot:giga -O /var/lib/firecracker/kernels/vmlinux \
-    "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.7/${ARCH}/vmlinux-5.10.204" && \
+    "https://s3.amazonaws.com/spec.ccfc.min/img/hello/kernel/hello-vmlinux.bin" && \
     # Create rootfs
     dd if=/dev/zero of=/var/lib/firecracker/rootfs/base.ext4 bs=1M count=200 && \
     mkfs.ext4 /var/lib/firecracker/rootfs/base.ext4 && \
