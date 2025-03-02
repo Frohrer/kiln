@@ -13,7 +13,17 @@ check_firecracker() {
 install_dependencies() {
     echo "Installing required system utilities..."
     apt-get update
-    apt-get install -y curl wget tar
+    apt-get install -y \
+        curl \
+        wget \
+        tar \
+        kmod \
+        util-linux \
+        iproute2 \
+        procps \
+        systemd \
+        fuse \
+        psmisc
 }
 
 # Function to download and install Firecracker
@@ -24,10 +34,34 @@ install_firecracker() {
     mv firecracker /usr/local/bin/
 }
 
+# Function to verify KVM setup
+verify_kvm() {
+    echo "Verifying KVM setup..."
+    if [ ! -e /dev/kvm ]; then
+        echo "Creating /dev/kvm device node..."
+        mknod /dev/kvm c 10 232
+    fi
+    chmod 666 /dev/kvm
+
+    # Load KVM modules if not loaded
+    if ! lsmod | grep -q '^kvm_intel\|^kvm_amd'; then
+        echo "Loading KVM modules..."
+        modprobe kvm
+        if [ -e /dev/cpu/*/cpuid ]; then
+            # Load the appropriate module based on CPU vendor
+            if grep -q "^vendor_id.*Intel" /proc/cpuinfo; then
+                modprobe kvm_intel
+            elif grep -q "^vendor_id.*AMD" /proc/cpuinfo; then
+                modprobe kvm_amd
+            fi
+        fi
+    fi
+}
+
 # Run setup tasks as root
 if [ "$(id -u)" = "0" ]; then
     # Install dependencies if needed
-    if ! command -v curl &> /dev/null; then
+    if ! command -v curl &> /dev/null || ! command -v lsmod &> /dev/null; then
         install_dependencies
     fi
 
@@ -35,6 +69,9 @@ if [ "$(id -u)" = "0" ]; then
     if ! check_firecracker; then
         install_firecracker
     fi
+
+    # Verify KVM setup
+    verify_kvm
 
     # Ensure directories exist and have correct permissions
     mkdir -p /var/lib/firecracker/{kernels,rootfs,images}

@@ -9,7 +9,7 @@ RUN apt-get update && \
     libreadline-dev libblas-dev liblapack-dev libpcre3-dev libarpack2-dev \
     libfftw3-dev libglpk-dev libqhull-dev libqrupdate-dev libsuitesparse-dev \
     libsundials-dev libpcre2-dev libcap-dev curl wget iproute2 jq docker.io e2fsprogs \
-    gosu && \
+    gosu kmod util-linux iproute2 procps systemd fuse psmisc && \
     rm -rf /var/lib/apt/lists/*
 
 # Install KVM kernel module and required tools
