@@ -8,7 +8,7 @@ RUN apt-get update && \
     libncurses6 libncurses5 libedit-dev libseccomp-dev rename procps python3 \
     libreadline-dev libblas-dev liblapack-dev libpcre3-dev libarpack2-dev \
     libfftw3-dev libglpk-dev libqhull-dev libqrupdate-dev libsuitesparse-dev \
-    libsundials-dev libpcre2-dev libcap-dev curl wget iproute2 jq && \
+    libsundials-dev libpcre2-dev libcap-dev curl wget iproute2 jq docker.io e2fsprogs && \
     rm -rf /var/lib/apt/lists/*
 
 # Install KVM kernel module and required tools
@@ -29,26 +29,40 @@ RUN curl -Lo firecracker https://github.com/firecracker-microvm/firecracker/rele
     chmod +x firecracker && \
     mv firecracker /usr/local/bin/
 
-# Set up Firecracker directories and download assets
+# Set up Firecracker directories and create rootfs
 RUN set -e && \
     ARCH="$(uname -m)" && \
-    # Create necessary directories first
+    # Create necessary directories
     mkdir -p /var/lib/firecracker/{kernels,rootfs,images} && \
     mkdir -p /kiln && \
-    # Set initial permissions
-    chown -R kiln:kiln /var/lib/firecracker /kiln && \
-    chmod -R 755 /var/lib/firecracker /kiln && \
-    # Download latest kernel
+    # Download kernel
     wget --progress=dot:giga -O /var/lib/firecracker/kernels/vmlinux \
     "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.7/${ARCH}/vmlinux-5.10.204" && \
-    # Download rootfs
-    wget --progress=dot:giga -O /var/lib/firecracker/rootfs/base.ext4 \
-    "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.7/${ARCH}/ubuntu-22.04.ext4" && \
+    # Create rootfs
+    dd if=/dev/zero of=/var/lib/firecracker/rootfs/base.ext4 bs=1M count=200 && \
+    mkfs.ext4 /var/lib/firecracker/rootfs/base.ext4 && \
+    mkdir -p /tmp/my-rootfs && \
+    mount /var/lib/firecracker/rootfs/base.ext4 /tmp/my-rootfs && \
+    # Use Alpine to create the rootfs
+    docker run --rm -v /tmp/my-rootfs:/my-rootfs alpine sh -c '\
+        apk add openrc util-linux && \
+        ln -s agetty /etc/init.d/agetty.ttyS0 && \
+        echo ttyS0 > /etc/securetty && \
+        rc-update add agetty.ttyS0 default && \
+        rc-update add devfs boot && \
+        rc-update add procfs boot && \
+        rc-update add sysfs boot && \
+        for d in bin etc lib root sbin usr; do tar c "/$d" | tar x -C /my-rootfs; done && \
+        for dir in dev proc run sys var; do mkdir /my-rootfs/${dir}; done \
+    ' && \
+    umount /tmp/my-rootfs && \
+    rm -rf /tmp/my-rootfs && \
     # Verify files exist and have size
     [ -s /var/lib/firecracker/kernels/vmlinux ] && \
     [ -s /var/lib/firecracker/rootfs/base.ext4 ] && \
-    # Set final permissions
-    chown -R kiln:kiln /var/lib/firecracker
+    # Set permissions
+    chown -R kiln:kiln /var/lib/firecracker /kiln && \
+    chmod -R 755 /var/lib/firecracker /kiln
 
 WORKDIR /kiln_api
 COPY ["package.json", "./"]
