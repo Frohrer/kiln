@@ -10,6 +10,16 @@ services:
     profiles:
       - build-kernel
 
+  rootfs-builder:
+    build:
+      context: .
+      dockerfile: Dockerfile.rootfs-builder
+    privileged: true  # Required for mount operations
+    volumes:
+      - rootfs-data:/output
+    profiles:
+      - build-rootfs
+
   api:
     build:
       context: .

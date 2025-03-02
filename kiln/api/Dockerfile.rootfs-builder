@@ -1,0 +1,30 @@
+FROM alpine:latest
+
+RUN apk add --no-cache e2fsprogs util-linux
+
+WORKDIR /build
+
+# Create and format the rootfs image
+RUN dd if=/dev/zero of=base.ext4 bs=1M count=200 && \
+    mkfs.ext4 base.ext4 && \
+    mkdir -p /mnt/rootfs
+
+# Create the rootfs contents
+RUN mount base.ext4 /mnt/rootfs && \
+    # Install required packages and setup
+    apk add --no-cache openrc util-linux && \
+    ln -s agetty /etc/init.d/agetty.ttyS0 && \
+    echo ttyS0 > /etc/securetty && \
+    rc-update add agetty.ttyS0 default && \
+    rc-update add devfs boot && \
+    rc-update add procfs boot && \
+    rc-update add sysfs boot && \
+    # Copy system files to rootfs
+    for d in bin etc lib root sbin usr; do tar c "/$d" | tar x -C /mnt/rootfs; done && \
+    # Create necessary directories
+    for dir in dev proc run sys var; do mkdir /mnt/rootfs/${dir}; done && \
+    # Cleanup
+    umount /mnt/rootfs
+
+VOLUME /output
+CMD cp base.ext4 /output/base.ext4 
