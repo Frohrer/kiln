@@ -54,28 +54,29 @@ app.use(express.static(path.join(__dirname, 'public')));
     });
 
     logger.info('Loading packages');
-    const pkgdir = path.join(
-        config.data_directory,
-        globals.data_directories.packages
-    );
+    
+    // Load Firecracker VM images instead of isolate packages
+    const firecrackerService = require('./firecracker-service');
+    const imagesDir = firecrackerService.imagesDir;
+    
+    if (!fss.exists_sync(imagesDir)) {
+        logger.info(`Creating Firecracker images directory at ${imagesDir}`);
+        fss.mkdir_sync(imagesDir, { recursive: true });
+    }
 
-    const pkglist = await fs.readdir(pkgdir);
-
-    const languages = await Promise.all(
-        pkglist.map(lang => {
-            return fs.readdir(path.join(pkgdir, lang)).then(x => {
-                return x.map(y => path.join(pkgdir, lang, y));
+    // Register any existing Firecracker VM images
+    try {
+        const images = fss.readdir_sync(imagesDir);
+        images
+            .filter(file => file.endsWith('.ext4'))
+            .forEach(image => {
+                const imagePath = path.join(imagesDir, image);
+                logger.debug(`Loading VM image: ${imagePath}`);
+                runtime.load_package(imagePath);
             });
-        })
-    );
-
-    const installed_languages = languages
-        .flat()
-        .filter(pkg =>
-            fss.exists_sync(path.join(pkg, globals.pkg_installed_file))
-        );
-
-    installed_languages.for_each(pkg => runtime.load_package(pkg));
+    } catch (error) {
+        logger.error('Error loading VM images:', error);
+    }
 
     logger.info('Starting API Server');
     logger.debug('Constructing Express App');

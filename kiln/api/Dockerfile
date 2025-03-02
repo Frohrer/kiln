@@ -11,38 +11,45 @@ RUN apt-get update && \
     libsundials-dev libpcre2-dev libcap-dev curl wget iproute2 && \
     rm -rf /var/lib/apt/lists/*
 
-# Install Firecracker
-RUN curl -Lo firecracker https://github.com/firecracker-microvm/firecracker/releases/download/v1.5.0/firecracker-v1.5.0-x86_64 && \
-    chmod +x firecracker && \
-    mv firecracker /usr/local/bin/
-
-# Download Firecracker kernel and rootfs
-RUN mkdir -p /var/lib/firecracker/kernels && \
-    mkdir -p /var/lib/firecracker/rootfs && \
-    cd /var/lib/firecracker/kernels && \
-    wget https://s3.amazonaws.com/spec.ccfc.min/img/quickstart_guide/x86_64/kernels/vmlinux.bin -O vmlinux && \
-    cd /var/lib/firecracker/rootfs && \
-    wget https://s3.amazonaws.com/spec.ccfc.min/img/quickstart_guide/x86_64/rootfs/bionic.rootfs.ext4 -O base.ext4
-
 # Install KVM kernel module and required tools
 RUN apt-get update && \
     apt-get install -y qemu-kvm && \
     rm -rf /var/lib/apt/lists/*
 
-RUN useradd -M kiln
+# Create kiln user and group
+RUN useradd -M kiln && \
+    usermod -aG kvm kiln
 
-# Create directories for Firecracker
-RUN mkdir -p /kiln && chown kiln:kiln /kiln
-RUN mkdir -p /var/lib/firecracker/images
-RUN chown -R kiln:kiln /var/lib/firecracker
+# Install Firecracker
+RUN curl -Lo firecracker https://github.com/firecracker-microvm/firecracker/releases/download/v1.5.0/firecracker-v1.5.0-x86_64 && \
+    chmod +x firecracker && \
+    mv firecracker /usr/local/bin/
+
+# Create all required directories
+RUN mkdir -p /var/lib/firecracker/{kernels,rootfs,images} && \
+    mkdir -p /kiln
+
+# Download Firecracker kernel and rootfs
+RUN cd /var/lib/firecracker/kernels && \
+    wget https://s3.amazonaws.com/spec.ccfc.min/img/quickstart_guide/x86_64/kernels/vmlinux.bin -O vmlinux && \
+    cd /var/lib/firecracker/rootfs && \
+    wget https://s3.amazonaws.com/spec.ccfc.min/img/quickstart_guide/x86_64/rootfs/bionic.rootfs.ext4 -O base.ext4
+
+# Set proper permissions
+RUN chown -R kiln:kiln /var/lib/firecracker && \
+    chmod -R 755 /var/lib/firecracker && \
+    chown kiln:kiln /kiln && \
+    chmod 755 /kiln
 
 WORKDIR /kiln_api
 COPY ["package.json", "./"]
 RUN npm install
 COPY ./src ./src
-RUN chmod +x ./src/api-entrypoint.sh
-RUN find . -type f -name "*.sh" -exec chmod +x {} \;
+RUN chmod +x ./src/api-entrypoint.sh && \
+    find . -type f -name "*.sh" -exec chmod +x {} \; && \
+    chown -R kiln:kiln .
 
+USER kiln
 ENTRYPOINT ["/bin/bash", "./src/api-entrypoint.sh"]
 EXPOSE 2000
 EXPOSE 2020

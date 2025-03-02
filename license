@@ -1,0 +1,34 @@
+# Kiln Software License
+## License Terms
+
+Copyright © 2025 Kiln Contributors. All rights reserved.
+
+1. Definitions
+
+    "Software" refers to the source code, object code, documentation, and any related materials provided under this license.
+    "Commercial Use" means any use of the Software that directly or indirectly generates revenue.
+    "Large Entity" means any entity (company, organization, or individual) with annual gross revenue exceeding $1,000,000 USD.
+    "Non-Commercial Use" means use of the Software for research, personal, educational, or development purposes that do not directly generate revenue.
+
+2. Grant of Rights
+2.1 Non-Commercial Use and Small Entities
+
+The Software may be used, modified, and distributed without fee by:
+
+    Individuals for personal or educational use
+    Non-profit organizations
+    Commercial entities with annual gross revenue less than $1,000,000 USD
+
+2.2 Large Entity Commercial Use
+
+Large Entities must obtain a paid commercial license from the Copyright Holder to use, modify, or distribute the Software. Contact information for obtaining a commercial license is provided below.
+
+3. Restrictions
+
+    You may not remove or alter any copyright notices or license terms from the Software.
+    You may not use the name, trademarks, or logos of the Copyright Holder without prior written permission.
+    Distribution of the Software must include a copy of this license.
+
+4. Disclaimer of Warranty
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
