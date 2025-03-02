@@ -58,6 +58,27 @@ verify_kvm() {
     fi
 }
 
+# Function to verify required files
+verify_files() {
+    echo "Verifying required files..."
+    
+    # Check kernel
+    if [ ! -f /var/lib/firecracker/kernels/vmlinux ]; then
+        echo "Error: Kernel image not found at /var/lib/firecracker/kernels/vmlinux"
+        echo "Please run: docker-compose --profile build-kernel up kernel-builder"
+        exit 1
+    fi
+    
+    # Check rootfs
+    if [ ! -f /var/lib/firecracker/rootfs/base.ext4 ]; then
+        echo "Error: Base rootfs not found at /var/lib/firecracker/rootfs/base.ext4"
+        echo "Please run: docker-compose --profile build-rootfs up rootfs-builder"
+        exit 1
+    fi
+    
+    echo "All required files present"
+}
+
 # Run setup tasks as root
 if [ "$(id -u)" = "0" ]; then
     # Install dependencies if needed
@@ -78,6 +99,9 @@ if [ "$(id -u)" = "0" ]; then
     mkdir -p /kiln
     chown -R kiln:kiln /var/lib/firecracker /kiln
     chmod -R 755 /var/lib/firecracker /kiln
+
+    # Verify required files
+    verify_files
 
     # Drop privileges and run the actual application
     exec gosu kiln "$0" "$@"
