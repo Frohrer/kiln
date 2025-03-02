@@ -298,25 +298,69 @@ def delete_image(image_id):
         flash(f"Failed to delete image: {str(e)}", "error")
         return False
 
-@app.route("/images")
+@app.route('/images')
 def images_page():
-    images = list_images()
-    return render_template("images.html", images=images)
+    """Render the VM images management page."""
+    try:
+        logger.debug("Rendering images page")
+        return render_template('images.html')
+    except Exception as e:
+        logger.error(f"Error rendering images page: {e}", exc_info=True)
+        return "Internal Server Error", 500
 
-@app.route("/images/create", methods=["GET", "POST"])
-def create_image_page():
-    if request.method == "POST":
-        language = request.form.get("language")
-        version = request.form.get("version")
-        if language and version:
-            create_image(language, version)
-            return redirect(url_for("images_page"))
-    return render_template("create_image.html")
+@app.route('/api/images')
+def get_images():
+    """Get list of available VM images."""
+    try:
+        response = requests.get(f'{API_BASE}/images', headers=API_HEADERS, timeout=5)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.exceptions.RequestException as e:
+        logger.error(f"API request error: {str(e)}", exc_info=True)
+        return jsonify({"error": str(e)}), 503
+    except Exception as e:
+        logger.error(f"Error fetching images: {e}", exc_info=True)
+        return jsonify({"error": "Failed to fetch images"}), 500
 
-@app.route("/images/delete/<image_id>", methods=["POST"])
-def delete_image_route(image_id):
-    delete_image(image_id)
-    return redirect(url_for("images_page"))
+@app.route('/api/images', methods=['POST'])
+def create_image():
+    """Create a new VM image."""
+    try:
+        request_data = request.get_json()
+        logger.debug(f"Creating image with data: {request_data}")
+
+        response = requests.post(
+            f'{API_BASE}/images',
+            headers=API_HEADERS,
+            json=request_data,
+            timeout=300  # Longer timeout for image creation
+        )
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.exceptions.RequestException as e:
+        logger.error(f"API request error: {str(e)}", exc_info=True)
+        return jsonify({"error": str(e)}), 503
+    except Exception as e:
+        logger.error(f"Error creating image: {e}", exc_info=True)
+        return jsonify({"error": "Failed to create image"}), 500
+
+@app.route('/api/images/<image_id>', methods=['DELETE'])
+def delete_image(image_id):
+    """Delete a VM image."""
+    try:
+        response = requests.delete(
+            f'{API_BASE}/images/{image_id}',
+            headers=API_HEADERS,
+            timeout=30
+        )
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.exceptions.RequestException as e:
+        logger.error(f"API request error: {str(e)}", exc_info=True)
+        return jsonify({"error": str(e)}), 503
+    except Exception as e:
+        logger.error(f"Error deleting image: {e}", exc_info=True)
+        return jsonify({"error": "Failed to delete image"}), 500
 
 @app.route('/api/processes')
 def get_processes():

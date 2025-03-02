@@ -2,209 +2,91 @@
 const editor = ace.edit("editor");
 editor.setTheme("ace/theme/monokai");
 editor.session.setMode("ace/mode/python");
-editor.setOptions({
-    fontSize: "14px",
-    showPrintMargin: false,
-    fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-    highlightActiveLine: true,
-    showGutter: true,
-    displayIndentGuides: true,
-    enableLiveAutocompletion: true,
-    enableSnippets: true,
-});
+editor.setFontSize(14);
 
-// Elements
-const languageSelect = document.getElementById('languageSelect');
-const runButton = document.getElementById('runCode');
-const output = document.getElementById('output');
-const outputSpinner = document.getElementById('outputSpinner');
-const webAppUrlContainer = document.getElementById('webAppUrlContainer');
-const webAppUrl = document.getElementById('webAppUrl');
-const urlText = webAppUrl.querySelector('.url-text');
-const executionDetails = document.getElementById('executionDetails');
-const totalDuration = document.getElementById('totalDuration');
-const cpuTime = document.getElementById('cpuTime');
-const memoryUsage = document.getElementById('memoryUsage');
-const installMetrics = document.getElementById('installMetrics');
-const executeMetrics = document.getElementById('executeMetrics');
+// Store available runtimes
+let availableRuntimes = [];
 
-
-// Fetch available runtimes and populate language select
-async function fetchRuntimes() {
+// Function to load available runtimes
+async function loadRuntimes() {
     try {
         const response = await fetch('/api/runtimes');
-        const runtimes = await response.json();
+        const data = await response.json();
+        availableRuntimes = data.runtimes;
 
-        // Sort runtimes by language
-        const languages = [...new Set(runtimes.map(r => r.language))].sort();
+        const languageSelect = document.getElementById('languageSelect');
+        languageSelect.innerHTML = '<option value="" selected disabled>Select Language</option>';
 
-        // Clear existing options except the placeholder
-        while (languageSelect.options.length > 1) {
-            languageSelect.remove(1);
-        }
+        // Group runtimes by language
+        const runtimesByLanguage = availableRuntimes.reduce((acc, runtime) => {
+            if (!acc[runtime.language]) {
+                acc[runtime.language] = [];
+            }
+            acc[runtime.language].push(runtime);
+            return acc;
+        }, {});
 
-        // Populate select
-        languages.forEach(lang => {
-            const option = document.createElement('option');
-            option.value = lang;
-            option.textContent = lang.charAt(0).toUpperCase() + lang.slice(1);
-            languageSelect.appendChild(option);
+        // Create optgroups for each language
+        Object.entries(runtimesByLanguage).forEach(([language, runtimes]) => {
+            const optgroup = document.createElement('optgroup');
+            optgroup.label = language.charAt(0).toUpperCase() + language.slice(1);
+
+            // Sort versions in descending order
+            runtimes.sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }));
+
+            runtimes.forEach(runtime => {
+                const option = document.createElement('option');
+                option.value = `${runtime.language}-${runtime.version}`;
+                option.textContent = `${runtime.version}${runtime.available ? '' : ' (No Image)'}`;
+                option.disabled = !runtime.available;
+                if (runtime.available) {
+                    option.title = `Memory: ${runtime.limits.memory.run}MB, CPU: ${runtime.limits.cpu.run}s`;
+                } else {
+                    option.title = 'VM image not available';
+                }
+                optgroup.appendChild(option);
+            });
+
+            languageSelect.appendChild(optgroup);
+        });
+
+        // Set editor mode based on selected language
+        languageSelect.addEventListener('change', (e) => {
+            const [language] = e.target.value.split('-');
+            const modeMap = {
+                'python': 'python',
+                'nodejs': 'javascript',
+                'streamlit': 'python'
+            };
+            editor.session.setMode(`ace/mode/${modeMap[language] || 'text'}`);
         });
     } catch (error) {
-        console.error('Error fetching runtimes:', error);
-        showError('Failed to load available languages');
+        console.error('Error loading runtimes:', error);
+        document.getElementById('languageSelect').innerHTML = '<option value="" disabled>Error loading runtimes</option>';
     }
 }
 
-// Format duration in milliseconds to human-readable format
-function formatDuration(ms) {
-    if (!ms) return '-';
-    if (ms < 1000) return `${ms}ms`;
-    const seconds = ms / 1000;
-    if (seconds < 60) return `${seconds.toFixed(2)}s`;
-    const minutes = Math.floor(seconds / 60);
-    const remainingSeconds = (seconds % 60).toFixed(1);
-    return `${minutes}m ${remainingSeconds}s`;
-}
+// Function to run code
+async function runCode() {
+    const runButton = document.getElementById('runCode');
+    const outputDiv = document.getElementById('output');
+    const spinner = document.getElementById('outputSpinner');
+    const webAppUrlContainer = document.getElementById('webAppUrlContainer');
+    const executionDetails = document.getElementById('executionDetails');
 
-// Format bytes to human-readable format
-function formatBytes(bytes) {
-    if (!bytes) return '-';
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
-}
-
-// Update execution metrics display
-function updateExecutionMetrics(result) {
-    if (!result || !result.timing) {
-        executionDetails.classList.add('d-none');
+    const runtime = document.getElementById('languageSelect').value;
+    if (!runtime) {
+        alert('Please select a runtime');
         return;
     }
 
-    const { timing, run } = result;
-    executionDetails.classList.remove('d-none');
-
-    // Update summary metrics
-    totalDuration.textContent = formatDuration(timing.totalDuration);
-    cpuTime.textContent = formatDuration(timing.metrics?.cpuTime);
-    memoryUsage.textContent = formatBytes(timing.metrics?.memory);
-
-    // Update install stage metrics
-    if (timing.stages?.install || result.stages?.install) {
-        const installStage = timing.stages?.install || {};
-        const installOutput = result.stages?.install || {};
-
-        installMetrics.innerHTML = `
-            <div class="row g-2">
-                <div class="col-sm-4">
-                    <div class="text-muted">Duration:</div>
-                    <div>${formatDuration(installStage.duration)}</div>
-                </div>
-                <div class="col-sm-4">
-                    <div class="text-muted">CPU Time:</div>
-                    <div>${formatDuration(installStage.cpuTime)}</div>
-                </div>
-                <div class="col-sm-4">
-                    <div class="text-muted">Memory:</div>
-                    <div>${formatBytes(installStage.memory)}</div>
-                </div>
-            </div>
-            ${installOutput.stdout || installOutput.stderr ? `
-                <div class="mt-3">
-                    ${installOutput.stdout ? `
-                        <div class="mb-2">
-                            <div class="text-muted">Output:</div>
-                            <pre class="small mb-0">${installOutput.stdout}</pre>
-                        </div>
-                    ` : ''}
-                    ${installOutput.stderr ? `
-                        <div>
-                            <div class="text-muted">Errors:</div>
-                            <pre class="small mb-0 text-danger">${installOutput.stderr}</pre>
-                        </div>
-                    ` : ''}
-                </div>
-            ` : ''}
-        `;
-    }
-
-    // Update execute stage metrics
-    if (timing.stages?.execute || result.stages?.execute) {
-        const executeStage = timing.stages?.execute || {};
-        const executeOutput = result.stages?.execute || {};
-
-        executeMetrics.innerHTML = `
-            <div class="row g-2">
-                <div class="col-sm-4">
-                    <div class="text-muted">Duration:</div>
-                    <div>${formatDuration(executeStage.duration)}</div>
-                </div>
-                <div class="col-sm-4">
-                    <div class="text-muted">CPU Time:</div>
-                    <div>${formatDuration(executeStage.cpuTime)}</div>
-                </div>
-                <div class="col-sm-4">
-                    <div class="text-muted">Memory:</div>
-                    <div>${formatBytes(executeStage.memory)}</div>
-                </div>
-            </div>
-            <div class="row g-2 mt-2">
-                <div class="col-sm-4">
-                    <div class="text-muted">Exit Code:</div>
-                    <div>${run?.code ?? '-'}</div>
-                </div>
-                <div class="col-sm-4">
-                    <div class="text-muted">Wall Time:</div>
-                    <div>${formatDuration(run?.wall_time)}</div>
-                </div>
-                <div class="col-sm-4">
-                    <div class="text-muted">Status:</div>
-                    <div>${run?.status || '-'}</div>
-                </div>
-            </div>
-            ${executeOutput.stdout || executeOutput.stderr ? `
-                <div class="mt-3">
-                    ${executeOutput.stdout ? `
-                        <div class="mb-2">
-                            <div class="text-muted">Output:</div>
-                            <pre class="small mb-0">${executeOutput.stdout}</pre>
-                        </div>
-                    ` : ''}
-                    ${executeOutput.stderr ? `
-                        <div>
-                            <div class="text-muted">Errors:</div>
-                            <pre class="small mb-0 text-danger">${executeOutput.stderr}</pre>
-                        </div>
-                    ` : ''}
-                </div>
-            ` : ''}
-        `;
-    }
-}
-
-// Execute code
-async function executeCode() {
-    const language = languageSelect.value;
-    if (!language) {
-        showError('Please select a language');
-        return;
-    }
-
+    const [language, version] = runtime.split('-');
     const code = editor.getValue();
-    if (!code.trim()) {
-        showError('Please enter some code');
-        return;
-    }
 
-    // Update UI state
+    // Disable run button and show spinner
     runButton.disabled = true;
-    outputSpinner.classList.remove('d-none');
-    const originalButtonText = runButton.innerHTML;
-    runButton.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Running...';
-    output.textContent = 'Executing code...';
+    spinner.classList.remove('d-none');
+    outputDiv.textContent = 'Running...';
     webAppUrlContainer.classList.add('d-none');
     executionDetails.classList.add('d-none');
 
@@ -212,90 +94,78 @@ async function executeCode() {
         const response = await fetch('/api/execute', {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                language: language,
-                version: '*', // Latest version
+                language,
+                version,
                 files: [{
-                    name: 'main.' + getFileExtension(language),
+                    name: 'main.py',
                     content: code
                 }]
             })
         });
 
-        let result;
-        try {
-            result = await response.json();
-        } catch (jsonError) {
-            console.error('Error parsing JSON:', jsonError);
-            showError('Invalid response from server');
+        const result = await response.json();
+
+        if (result.error) {
+            outputDiv.textContent = `Error: ${result.error}`;
             return;
         }
 
-        if (!response.ok) {
-            showError(result.message || 'Failed to execute code');
-            return;
-        }
-
-        // Check if execution was successful
-        if (result.run && result.run.code === 0) {
-            // Display execution results
-            const stdout = result.stages?.execute?.stdout || result.run?.stdout || '';
-            const stderr = result.stages?.execute?.stderr || result.run?.stderr || '';
-            output.textContent = stdout + (stderr ? '\nErrors:\n' + stderr : '');
-
-            // Display web app URL if available
-            if (result.webAppUrl) {
-                webAppUrl.href = result.webAppUrl;
-                urlText.textContent = result.webAppUrl;
-                webAppUrlContainer.classList.remove('d-none');
+        // Display output
+        let output = '';
+        if (result.stages) {
+            if (result.stages.install) {
+                output += '=== Installation Output ===\n';
+                output += result.stages.install.stdout || '';
+                output += result.stages.install.stderr || '';
+                output += '\n';
             }
+            if (result.stages.execute) {
+                output += '=== Execution Output ===\n';
+                output += result.stages.execute.stdout || '';
+                output += result.stages.execute.stderr || '';
+            }
+        }
+        outputDiv.textContent = output;
 
-            // Update execution metrics
-            updateExecutionMetrics(result);
-        } else {
-            const errorMessage = result.run?.message || 'Execution failed';
-            const errorDetails = result.run?.stderr || '';
-            showError(`${errorMessage}${errorDetails ? '\n' + errorDetails : ''}`);
+        // Show web app URL if available
+        if (result.webAppUrl) {
+            webAppUrlContainer.classList.remove('d-none');
+            const urlText = webAppUrlContainer.querySelector('.url-text');
+            const urlLink = webAppUrlContainer.querySelector('#webAppUrl');
+            urlText.textContent = result.webAppUrl;
+            urlLink.href = result.webAppUrl;
+        }
+
+        // Show execution details
+        if (result.timing) {
+            executionDetails.classList.remove('d-none');
+            document.getElementById('totalDuration').textContent = `${result.timing.total_duration.toFixed(2)}s`;
+            document.getElementById('cpuTime').textContent = `${result.timing.cpu_time.toFixed(2)}s`;
+            document.getElementById('memoryUsage').textContent = `${(result.timing.memory_usage / 1024 / 1024).toFixed(2)}MB`;
+
+            // Update stage metrics
+            if (result.stages.install) {
+                document.getElementById('installMetrics').textContent = JSON.stringify(result.stages.install, null, 2);
+            }
+            if (result.stages.execute) {
+                document.getElementById('executeMetrics').textContent = JSON.stringify(result.stages.execute, null, 2);
+            }
         }
     } catch (error) {
-        console.error('Error executing code:', error);
-        showError('Failed to execute code');
+        console.error('Error running code:', error);
+        outputDiv.textContent = `Error: ${error.message}`;
     } finally {
+        // Re-enable run button and hide spinner
         runButton.disabled = false;
-        outputSpinner.classList.add('d-none');
-        runButton.innerHTML = originalButtonText;
+        spinner.classList.add('d-none');
     }
 }
 
-// Get file extension for language
-function getFileExtension(language) {
-    const extensions = {
-        python: 'py',
-        javascript: 'js',
-        typescript: 'ts',
-        ruby: 'rb',
-        go: 'go',
-        java: 'java',
-        cpp: 'cpp',
-        c: 'c',
-    };
-    return extensions[language.toLowerCase()] || language.toLowerCase();
-}
-
-// Show error in output
-function showError(message) {
-    output.textContent = `Error: ${message}`;
-}
-
 // Event listeners
-languageSelect.addEventListener('change', (e) => {
-    const language = e.target.value;
-    editor.session.setMode(`ace/mode/${language.toLowerCase()}`);
+document.addEventListener('DOMContentLoaded', () => {
+    loadRuntimes();
+    document.getElementById('runCode').addEventListener('click', runCode);
 });
-
-runButton.addEventListener('click', executeCode);
-
-// Initialize languages when the page loads
-document.addEventListener('DOMContentLoaded', fetchRuntimes);
