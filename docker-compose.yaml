@@ -24,6 +24,8 @@ services:
         stop_grace_period: 10s
         stop_signal: SIGTERM
         privileged: true
+        devices:
+            - /dev/kvm:/dev/kvm
         volumes:
             - ./data/kiln/packages:/kiln/packages
             - kernel-data:/var/lib/firecracker/kernels

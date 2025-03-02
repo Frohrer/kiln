@@ -27,10 +27,15 @@ RUN apt-get update && \
     # Create kvm group if it doesn't exist
     groupadd -f kvm
 
-# Create kiln user and group with sudo access for specific commands
+# Create kiln user and group with proper permissions
 RUN useradd -M kiln && \
     usermod -aG kvm kiln && \
     usermod -aG disk kiln && \
+    # Create /dev/kvm if it doesn't exist (for Docker environments)
+    mkdir -p /dev && \
+    mknod /dev/kvm c 10 232 || true && \
+    chown root:kvm /dev/kvm && \
+    chmod 660 /dev/kvm && \
     # Verify group membership
     groups kiln | grep kvm
 
@@ -63,10 +68,12 @@ chmod +x /usr/local/bin/run-as-root.sh
 
 # Create the entrypoint wrapper
 RUN echo '#!/bin/bash\n\
-# Give root group write permission to /dev/kvm\n\
-if [ -e /dev/kvm ]; then\n\
-    chmod g+rw /dev/kvm\n\
+# Ensure /dev/kvm exists and has proper permissions\n\
+if [ ! -e /dev/kvm ]; then\n\
+    mknod /dev/kvm c 10 232 || true\n\
 fi\n\
+chown root:kvm /dev/kvm\n\
+chmod 660 /dev/kvm\n\
 \n\
 # Run the actual entrypoint script as kiln user\n\
 exec gosu kiln /bin/bash ./src/api-entrypoint.sh' > /usr/local/bin/entrypoint-wrapper.sh && \
