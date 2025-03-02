@@ -17,6 +17,9 @@ class FirecrackerService {
         this.rootfsDir = '/var/lib/firecracker/rootfs';
         this.firecrackerPath = process.env.FIRECRACKER_PATH || '/usr/local/bin/firecracker';
         
+        // Verify KVM is available and accessible
+        this.verifyKVM();
+        
         // Ensure directories exist
         [this.imagesDir, this.kernelsDir, this.rootfsDir].forEach(dir => {
             if (!fs.existsSync(dir)) {
@@ -49,6 +52,62 @@ class FirecrackerService {
         this.registerExistingImages();
     }
 
+    verifyKVM() {
+        try {
+            // Check if running in a VM
+            const isVM = execSync('systemd-detect-virt || true').toString().trim();
+            const isInVM = isVM !== 'none' && isVM !== '';
+            
+            // Check if KVM module is loaded
+            const lsmod = execSync('lsmod | grep kvm').toString();
+            if (!lsmod.includes('kvm')) {
+                if (isInVM) {
+                    throw new Error('KVM module is not loaded. Since you are running in a VM, please ensure nested virtualization is enabled in your hypervisor settings.');
+                } else {
+                    throw new Error('KVM module is not loaded. Please ensure KVM is enabled in BIOS/UEFI and the kvm module is loaded.');
+                }
+            }
+
+            // Check for nested virtualization if in a VM
+            if (isInVM) {
+                try {
+                    const nestedEnabled = fs.readFileSync('/sys/module/kvm_intel/parameters/nested', 'utf8').trim() === 'Y' ||
+                                        fs.readFileSync('/sys/module/kvm_amd/parameters/nested', 'utf8').trim() === '1';
+                    if (!nestedEnabled) {
+                        throw new Error('Nested virtualization is not enabled. Please enable it in your hypervisor settings.');
+                    }
+                    logger.debug('Nested virtualization is enabled');
+                } catch (error) {
+                    if (!error.message.includes('ENOENT')) {
+                        throw new Error(`Failed to check nested virtualization status: ${error.message}`);
+                    }
+                }
+            }
+
+            // Check if /dev/kvm exists and is accessible
+            if (!fs.existsSync('/dev/kvm')) {
+                if (isInVM) {
+                    throw new Error('/dev/kvm does not exist. Please ensure nested virtualization is enabled in your hypervisor settings and KVM is properly installed.');
+                } else {
+                    throw new Error('/dev/kvm does not exist. Please ensure KVM is properly installed.');
+                }
+            }
+
+            try {
+                fs.accessSync('/dev/kvm', fs.constants.R_OK | fs.constants.W_OK);
+            } catch (error) {
+                throw new Error('/dev/kvm is not accessible. Please ensure current user has proper permissions (usually needs to be in kvm group).');
+            }
+
+            logger.debug(`KVM verification passed successfully${isInVM ? ' (running in VM with nested virtualization)' : ''}`);
+        } catch (error) {
+            if (error.message.includes('Command failed')) {
+                throw new Error('Failed to check KVM status. Please ensure KVM and required utilities are installed.');
+            }
+            throw error;
+        }
+    }
+
     registerExistingImages() {
         try {
             const files = fs.readdirSync(this.imagesDir);
@@ -67,6 +126,8 @@ class FirecrackerService {
         const imageId = `${language}-${version}`;
         const imagePath = path.join(this.imagesDir, `${imageId}.ext4`);
         const baseRootfsPath = path.join(this.rootfsDir, 'base.ext4');
+        const mountPoint = `/tmp/mount-${imageId}`;
+        const baseRootfsMount = `/tmp/base-rootfs`;
         
         try {
             // Create a new image with more space (4GB)
@@ -74,8 +135,6 @@ class FirecrackerService {
             execSync(`mkfs.ext4 ${imagePath}`);
             
             // Create mount points
-            const mountPoint = `/tmp/mount-${imageId}`;
-            const baseRootfsMount = `/tmp/base-rootfs`;
             fs.mkdirSync(mountPoint, { recursive: true });
             fs.mkdirSync(baseRootfsMount, { recursive: true });
 
@@ -87,6 +146,10 @@ class FirecrackerService {
                     // Mount base rootfs and copy files
                     execSync(`mount -o loop ${baseRootfsPath} ${baseRootfsMount}`);
                     execSync(`cp -a ${baseRootfsMount}/. ${mountPoint}/`);
+                    
+                    // Ensure all processes are done with the mount before unmounting
+                    execSync('sync');
+                    execSync(`fuser -k ${baseRootfsMount} || true`);
                     execSync(`umount ${baseRootfsMount}`);
 
                     // Create necessary directories
@@ -113,38 +176,12 @@ class FirecrackerService {
                         path: imagePath
                     };
                 } finally {
-                    // Clean up base rootfs mount
-                    try {
-                        if (fs.existsSync(baseRootfsMount)) {
-                            execSync(`umount ${baseRootfsMount} 2>/dev/null || true`);
-                            // Wait a bit before trying to remove the directory
-                            setTimeout(() => {
-                                try {
-                                    fs.rmdirSync(baseRootfsMount);
-                                } catch (e) {
-                                    logger.warn(`Could not remove base rootfs mount point: ${e}`);
-                                }
-                            }, 1000);
-                        }
-                    } catch (error) {
-                        logger.error(`Failed to clean up base rootfs mount: ${error}`);
-                    }
+                    // Clean up base rootfs mount with retries
+                    await this.cleanupMount(baseRootfsMount);
                 }
             } finally {
-                // Clean up new image mount
-                try {
-                    execSync(`umount ${mountPoint} 2>/dev/null || true`);
-                    // Wait a bit before trying to remove the directory
-                    setTimeout(() => {
-                        try {
-                            fs.rmdirSync(mountPoint);
-                        } catch (e) {
-                            logger.warn(`Could not remove mount point: ${e}`);
-                        }
-                    }, 1000);
-                } catch (error) {
-                    logger.error(`Failed to clean up mount point: ${error}`);
-                }
+                // Clean up new image mount with retries
+                await this.cleanupMount(mountPoint);
             }
         } catch (error) {
             // Cleanup on failure
@@ -153,6 +190,38 @@ class FirecrackerService {
             }
             logger.error(`Failed to build image: ${error}`);
             throw error;
+        }
+    }
+
+    async cleanupMount(mountPath) {
+        if (!fs.existsSync(mountPath)) return;
+
+        const maxRetries = 3;
+        for (let i = 0; i < maxRetries; i++) {
+            try {
+                // Ensure all processes are done with the mount
+                execSync('sync');
+                
+                // Try to kill any processes using the mount
+                execSync(`fuser -k ${mountPath} || true`);
+                
+                // Force unmount if needed
+                execSync(`umount -f ${mountPath} || umount -l ${mountPath} || true`);
+                
+                // Wait a bit before trying to remove the directory
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                // Try to remove the mount point
+                fs.rmdirSync(mountPath);
+                return;
+            } catch (error) {
+                if (i === maxRetries - 1) {
+                    logger.warn(`Could not cleanup mount point ${mountPath} after ${maxRetries} attempts: ${error}`);
+                } else {
+                    logger.debug(`Retry ${i + 1}/${maxRetries} cleaning up mount point ${mountPath}`);
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                }
+            }
         }
     }
 
@@ -368,237 +437,4 @@ class FirecrackerService {
                 throw new Error(`Image not found at ${imagePath}`);
             }
 
-            logger.debug(`Using image at path: ${imagePath}`);
-
-            // Configure VM via API
-            const vmConfig = {
-                boot_source: {
-                    kernel_image_path: path.join(this.kernelsDir, 'vmlinux'),
-                    boot_args: 'console=ttyS0 reboot=k panic=1 init=/bin/systemd'
-                },
-                drives: [{
-                    drive_id: 'rootfs',
-                    path_on_host: imagePath,
-                    is_root_device: true,
-                    is_read_only: false
-                }],
-                machine_config: {
-                    vcpu_count: config.cpu_count || 1,
-                    mem_size_mib: config.memory_limit || 1024,
-                    smt: false  // Replaces ht_enabled
-                },
-                network_interfaces: [{
-                    iface_id: 'eth0',
-                    host_dev_name: 'tap0',
-                    guest_mac: 'AA:FC:00:00:00:01'
-                }]
-            };
-
-            // Configure the VM using Firecracker's API
-            await this.configureVM(socketPath, vmConfig);
-
-            // Store VM instance
-            this.vmInstances.set(vmId, {
-                process: firecracker,
-                socket: socketPath,
-                config: vmConfig,
-                startTime: Date.now()
-            });
-
-            return {
-                vmId,
-                socket: socketPath
-            };
-        } catch (error) {
-            logger.error(`Failed to start VM: ${error}`);
-            throw error;
-        }
-    }
-
-    async configureVM(socketPath, config) {
-        // Helper function to make API calls to Firecracker via Unix socket
-        const makeRequest = async (method, path, body) => {
-            return new Promise((resolve, reject) => {
-                // Wait for socket to be available
-                const maxRetries = 10;
-                let retries = 0;
-                
-                const tryConnect = () => {
-                    const options = {
-                        socketPath,
-                        method,
-                        path,
-                        headers: {
-                            'Accept': '*/*',
-                            'Content-Type': 'application/json'
-                        }
-                    };
-
-                    if (body) {
-                        const bodyStr = JSON.stringify(body);
-                        options.headers['Content-Length'] = Buffer.byteLength(bodyStr);
-                    }
-
-                    logger.debug(`Making request to Firecracker API: ${method} ${path}`);
-                    
-                    const req = http.request(options, (res) => {
-                        let data = '';
-                        res.on('data', chunk => data += chunk);
-                        res.on('end', () => {
-                            if (res.statusCode >= 200 && res.statusCode < 300) {
-                                logger.debug(`Firecracker API request successful: ${method} ${path}`);
-                                resolve(data ? JSON.parse(data) : undefined);
-                            } else {
-                                reject(new Error(`Firecracker API request failed with status ${res.statusCode}: ${data}`));
-                            }
-                        });
-                    });
-
-                    req.on('error', (err) => {
-                        if ((err.code === 'ENOENT' || err.code === 'ECONNREFUSED') && retries < maxRetries) {
-                            logger.debug(`Retrying connection to socket (attempt ${retries + 1}/${maxRetries})`);
-                            retries++;
-                            setTimeout(tryConnect, 500);
-                        } else {
-                            reject(err);
-                        }
-                    });
-
-                    if (body) {
-                        const bodyStr = JSON.stringify(body);
-                        logger.debug(`Request body: ${bodyStr}`);
-                        req.write(bodyStr);
-                    }
-                    req.end();
-                };
-
-                tryConnect();
-            });
-        };
-
-        try {
-            // Wait for the socket to be available
-            await new Promise(resolve => setTimeout(resolve, 1000));
-
-            logger.debug(`Configuring VM with socket at ${socketPath}`);
-
-            // Configure boot source
-            logger.debug('Configuring boot source...');
-            await makeRequest('PUT', '/boot-source', config.boot_source);
-
-            // Configure drives
-            logger.debug('Configuring drives...');
-            for (const drive of config.drives) {
-                await makeRequest('PUT', `/drives/${drive.drive_id}`, drive);
-            }
-
-            // Configure machine
-            logger.debug('Configuring machine...');
-            await makeRequest('PUT', '/machine-config', config.machine_config);
-
-            // Configure network if specified
-            if (config.network_interfaces) {
-                logger.debug('Configuring network interfaces...');
-                for (const network of config.network_interfaces) {
-                    await makeRequest('PUT', `/network-interfaces/${network.iface_id}`, network);
-                }
-            }
-
-            // Start the VM
-            logger.debug('Starting VM...');
-            await makeRequest('PUT', '/actions', { action_type: 'InstanceStart' });
-            logger.debug('VM started successfully');
-        } catch (error) {
-            logger.error(`Failed to configure VM: ${error}`);
-            throw error;
-        }
-    }
-
-    async stopVM(vmId) {
-        const instance = this.vmInstances.get(vmId);
-        if (!instance) {
-            return false;
-        }
-
-        try {
-            logger.debug(`Stopping VM ${vmId}`);
-            
-            const options = {
-                socketPath: instance.socket,
-                method: 'PUT',
-                path: '/actions',
-                headers: {
-                    'Accept': '*/*',
-                    'Content-Type': 'application/json'
-                }
-            };
-
-            const body = JSON.stringify({ action_type: 'SendCtrlAltDel' });
-            options.headers['Content-Length'] = Buffer.byteLength(body);
-
-            await new Promise((resolve, reject) => {
-                logger.debug('Sending shutdown signal to VM');
-                const req = http.request(options, (res) => {
-                    if (res.statusCode >= 200 && res.statusCode < 300) {
-                        logger.debug('Shutdown signal sent successfully');
-                        resolve();
-                    } else {
-                        reject(new Error(`Failed to send shutdown signal: ${res.statusCode}`));
-                    }
-                });
-
-                req.on('error', (err) => {
-                    logger.error(`Error sending shutdown signal: ${err}`);
-                    reject(err);
-                });
-
-                req.write(body);
-                req.end();
-            });
-
-            // Wait for VM to shutdown
-            logger.debug('Waiting for VM to shutdown');
-            await new Promise(resolve => setTimeout(resolve, 5000));
-
-            // Force kill if still running
-            logger.debug('Force killing VM process');
-            instance.process.kill();
-
-            // Clean up socket file
-            if (fs.existsSync(instance.socket)) {
-                logger.debug('Cleaning up socket file');
-                fs.unlinkSync(instance.socket);
-            }
-
-            this.vmInstances.delete(vmId);
-            logger.debug(`VM ${vmId} stopped successfully`);
-            return true;
-        } catch (error) {
-            logger.error(`Failed to stop VM: ${error}`);
-            throw error;
-        }
-    }
-
-    async executeInVM(vmId, command) {
-        const instance = this.vmInstances.get(vmId);
-        if (!instance) {
-            throw new Error('VM not found');
-        }
-
-        try {
-            // Execute command via vsock or SSH
-            // This is a placeholder - actual implementation would depend on the communication method
-            // You might want to use SSH, vsock, or another method to execute commands
-            return {
-                stdout: '',
-                stderr: '',
-                exitCode: 0
-            };
-        } catch (error) {
-            logger.error(`Failed to execute command in VM: ${error}`);
-            throw error;
-        }
-    }
-}
-
-module.exports = new FirecrackerService(); 
+            logger.debug(`

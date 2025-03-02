@@ -119,13 +119,13 @@ app.use(express.static(path.join(__dirname, 'public')));
 
     const server = app.listen(port, address, () => {
         logger.info('API server started on', config.bind_address);
-        logger.info('Running test...');
-        test()
     });
 
     process.on('SIGTERM', () => {
-        server.close();
-        process.exit(0);
+        logger.info('Received SIGTERM signal, shutting down server...');
+        server.close(() => {
+            logger.info('Server closed');
+        });
     });
 })();
 
