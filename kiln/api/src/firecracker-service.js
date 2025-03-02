@@ -401,44 +401,69 @@ class FirecrackerService {
         // Helper function to make API calls to Firecracker via Unix socket
         const makeRequest = async (method, path, body) => {
             return new Promise((resolve, reject) => {
-                const agent = new Agent({
-                    createConnection: () => createConnection(socketPath)
-                });
-
-                const options = {
-                    agent,
-                    method,
-                    path,
-                    headers: {
-                        'Accept': '*/*'
-                    }
-                };
-
-                if (body) {
-                    const bodyStr = JSON.stringify(body);
-                    options.headers['Content-Type'] = 'application/json';
-                    options.headers['Content-Length'] = Buffer.byteLength(bodyStr);
-                }
-
                 // Wait for socket to be available
-                const req = http.request(options, (res) => {
-                    let data = '';
-                    res.on('data', chunk => data += chunk);
-                    res.on('end', () => {
-                        if (res.statusCode >= 200 && res.statusCode < 300) {
-                            resolve(data ? JSON.parse(data) : undefined);
-                        } else {
-                            reject(new Error(`Firecracker API request failed with status ${res.statusCode}: ${data}`));
+                const maxRetries = 10;
+                let retries = 0;
+                
+                const tryConnect = () => {
+                    const agent = new Agent({
+                        createConnection: () => {
+                            const conn = createConnection({ path: socketPath });
+                            conn.on('error', (err) => {
+                                if (err.code === 'ENOENT' && retries < maxRetries) {
+                                    retries++;
+                                    setTimeout(tryConnect, 500);
+                                } else {
+                                    reject(err);
+                                }
+                            });
+                            return conn;
                         }
                     });
-                });
 
-                req.on('error', reject);
+                    const options = {
+                        agent,
+                        method,
+                        path,
+                        headers: {
+                            'Accept': '*/*',
+                            'Content-Type': 'application/json'
+                        }
+                    };
 
-                if (body) {
-                    req.write(JSON.stringify(body));
-                }
-                req.end();
+                    if (body) {
+                        const bodyStr = JSON.stringify(body);
+                        options.headers['Content-Length'] = Buffer.byteLength(bodyStr);
+                    }
+
+                    const req = http.request(options, (res) => {
+                        let data = '';
+                        res.on('data', chunk => data += chunk);
+                        res.on('end', () => {
+                            if (res.statusCode >= 200 && res.statusCode < 300) {
+                                resolve(data ? JSON.parse(data) : undefined);
+                            } else {
+                                reject(new Error(`Firecracker API request failed with status ${res.statusCode}: ${data}`));
+                            }
+                        });
+                    });
+
+                    req.on('error', (err) => {
+                        if (err.code === 'ENOENT' && retries < maxRetries) {
+                            retries++;
+                            setTimeout(tryConnect, 500);
+                        } else {
+                            reject(err);
+                        }
+                    });
+
+                    if (body) {
+                        req.write(JSON.stringify(body));
+                    }
+                    req.end();
+                };
+
+                tryConnect();
             });
         };
 
@@ -446,26 +471,34 @@ class FirecrackerService {
             // Wait for the socket to be available
             await new Promise(resolve => setTimeout(resolve, 1000));
 
+            logger.debug(`Configuring VM with socket at ${socketPath}`);
+
             // Configure boot source
+            logger.debug('Configuring boot source...');
             await makeRequest('PUT', '/boot-source', config.boot_source);
 
             // Configure drives
+            logger.debug('Configuring drives...');
             for (const drive of config.drives) {
                 await makeRequest('PUT', `/drives/${drive.drive_id}`, drive);
             }
 
             // Configure machine
+            logger.debug('Configuring machine...');
             await makeRequest('PUT', '/machine-config', config.machine_config);
 
             // Configure network if specified
             if (config.network_interfaces) {
+                logger.debug('Configuring network interfaces...');
                 for (const network of config.network_interfaces) {
                     await makeRequest('PUT', `/network-interfaces/${network.iface_id}`, network);
                 }
             }
 
             // Start the VM
+            logger.debug('Starting VM...');
             await makeRequest('PUT', '/actions', { action_type: 'InstanceStart' });
+            logger.debug('VM started successfully');
         } catch (error) {
             logger.error(`Failed to configure VM: ${error}`);
             throw error;
