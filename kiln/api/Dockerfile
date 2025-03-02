@@ -30,16 +30,25 @@ RUN curl -Lo firecracker https://github.com/firecracker-microvm/firecracker/rele
     mv firecracker /usr/local/bin/
 
 # Set up Firecracker directories and download assets
-RUN ARCH="$(uname -m)" && \
-    # Create necessary directories
+RUN set -e && \
+    ARCH="$(uname -m)" && \
+    # Create necessary directories first
     mkdir -p /var/lib/firecracker/{kernels,rootfs,images} && \
     mkdir -p /kiln && \
-    # Download kernel and rootfs
-    wget -O /var/lib/firecracker/kernels/vmlinux "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.7/${ARCH}/vmlinux-5.10.204" && \
-    wget -O /var/lib/firecracker/rootfs/base.ext4 "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.7/${ARCH}/ubuntu-22.04.ext4" && \
-    # Set permissions
+    # Set initial permissions
     chown -R kiln:kiln /var/lib/firecracker /kiln && \
-    chmod -R 755 /var/lib/firecracker /kiln
+    chmod -R 755 /var/lib/firecracker /kiln && \
+    # Download kernel
+    wget --progress=dot:giga -O /var/lib/firecracker/kernels/vmlinux.bin \
+    "https://s3.amazonaws.com/spec.ccfc.min/img/quickstart_guide/${ARCH}/kernels/vmlinux.bin" && \
+    # Download rootfs
+    wget --progress=dot:giga -O /var/lib/firecracker/rootfs/base.ext4 \
+    "https://s3.amazonaws.com/spec.ccfc.min/img/quickstart_guide/${ARCH}/rootfs/bionic.rootfs.ext4" && \
+    # Verify files exist and have size
+    [ -s /var/lib/firecracker/kernels/vmlinux.bin ] && \
+    [ -s /var/lib/firecracker/rootfs/base.ext4 ] && \
+    # Set final permissions
+    chown -R kiln:kiln /var/lib/firecracker
 
 WORKDIR /kiln_api
 COPY ["package.json", "./"]
