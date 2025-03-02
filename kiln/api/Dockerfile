@@ -9,7 +9,7 @@ RUN apt-get update && \
     libreadline-dev libblas-dev liblapack-dev libpcre3-dev libarpack2-dev \
     libfftw3-dev libglpk-dev libqhull-dev libqrupdate-dev libsuitesparse-dev \
     libsundials-dev libpcre2-dev libcap-dev curl wget iproute2 jq docker.io e2fsprogs \
-    kmod util-linux iproute2 procps systemd fuse psmisc systemd-container && \
+    kmod util-linux iproute2 procps systemd fuse psmisc && \
     rm -rf /var/lib/apt/lists/*
 
 # Install KVM kernel module and required tools
@@ -29,14 +29,12 @@ RUN curl -Lo firecracker https://github.com/firecracker-microvm/firecracker/rele
     chmod +x firecracker && \
     mv firecracker /usr/local/bin/
 
-# Set up Firecracker directories and systemd-nspawn requirements
+# Set up Firecracker directories and chroot requirements
 RUN mkdir -p /var/lib/firecracker/{kernels,rootfs,images} && \
     mkdir -p /kiln && \
-    mkdir -p /tmp/mount-python-3.12 && \
-    mkdir -p /run/systemd/nspawn && \
+    mkdir -p /tmp/mount-python-3.12/{proc,sys,dev/pts,dev/shm} && \
     chmod -R 777 /var/lib/firecracker && \
-    chmod -R 777 /kiln /tmp/mount-python-3.12 && \
-    chmod -R 777 /run/systemd
+    chmod -R 777 /kiln /tmp/mount-python-3.12
 
 WORKDIR /kiln_api
 COPY kiln/api/package.json ./

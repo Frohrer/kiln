@@ -400,16 +400,20 @@ class FirecrackerService {
                 throw error;
             }
 
-            // List the contents of the mount point for debugging
-            logger.debug('Mount point contents:', execSync(`ls -la ${mountPoint}`).toString());
-            
-            // Also check the script content was written correctly
-            logger.debug('Script content verification:', execSync(`cat ${scriptPath}`).toString());
+            // Mount required filesystems for chroot
+            try {
+                execSync(`mount -t proc proc ${mountPoint}/proc`);
+                execSync(`mount -t sysfs sys ${mountPoint}/sys`);
+                execSync(`mount -t devpts devpts ${mountPoint}/dev/pts`);
+                execSync(`mount -t tmpfs tmpfs ${mountPoint}/dev/shm`);
+            } catch (error) {
+                logger.warn(`Some filesystem mounts failed, but continuing: ${error.message}`);
+            }
 
             try {
-                // Execute setup using systemd-nspawn for better isolation
-                logger.debug('Executing setup in systemd-nspawn...');
-                const result = execSync(`systemd-nspawn --quiet --directory=${mountPoint} /setup.sh`, {
+                // Execute setup using chroot
+                logger.debug('Executing setup in chroot...');
+                const result = execSync(`chroot ${mountPoint} /setup.sh`, {
                     maxBuffer: 10 * 1024 * 1024 // 10MB buffer for output
                 });
                 logger.debug('Setup execution output:', result.toString());
@@ -417,16 +421,17 @@ class FirecrackerService {
                 logger.error(`Setup execution failed: ${error.message}`);
                 if (error.stdout) logger.error('Stdout:', error.stdout.toString());
                 if (error.stderr) logger.error('Stderr:', error.stderr.toString());
-                
-                // Try to get more information about the failure
-                try {
-                    logger.debug('Mount status:', execSync('mount').toString());
-                    logger.debug('Container environment:', execSync(`ls -la ${mountPoint}`).toString());
-                } catch (debugError) {
-                    logger.error('Failed to get debug information:', debugError.message);
-                }
-                
                 throw error;
+            } finally {
+                // Unmount filesystems in reverse order
+                try {
+                    execSync(`umount ${mountPoint}/dev/shm`);
+                    execSync(`umount ${mountPoint}/dev/pts`);
+                    execSync(`umount ${mountPoint}/sys`);
+                    execSync(`umount ${mountPoint}/proc`);
+                } catch (error) {
+                    logger.warn(`Some filesystem unmounts failed: ${error.message}`);
+                }
             }
         } finally {
             // Clean up the script
@@ -449,38 +454,15 @@ class FirecrackerService {
             'set -ex',
             'export DEBIAN_FRONTEND=noninteractive',
             '',
-            '# Ensure basic shell utilities are available',
-            'if [ ! -f /bin/sh ] || [ ! -f /bin/mount ]; then',
-            '    echo "Basic utilities missing from chroot environment"',
-            '    exit 1',
-            'fi',
-            '',
             '# Setup DNS',
             'echo "nameserver 8.8.8.8" > /etc/resolv.conf',
             'echo "nameserver 8.8.4.4" >> /etc/resolv.conf',
             '',
-            '# Setup dpkg directories',
+            '# Create required directories',
             'mkdir -p /var/lib/dpkg',
-            'touch /var/lib/dpkg/status',
-            'mkdir -p /var/lib/apt/lists',
+            'mkdir -p /var/lib/apt/lists/partial',
             'mkdir -p /var/cache/apt/archives/partial',
-            'mkdir -p /var/lib/dpkg/updates',
-            'mkdir -p /var/lib/dpkg/info',
-            'mkdir -p /var/lib/dpkg/alternatives',
-            'mkdir -p /var/lib/dpkg/parts',
-            'mkdir -p /var/lib/dpkg/triggers',
-            'mkdir -p /run/lock',
-            '',
-            '# Initialize dpkg status',
-            'if [ ! -f /var/lib/dpkg/status ]; then',
-            '    touch /var/lib/dpkg/status',
-            '    echo "" > /var/lib/dpkg/status',
-            'fi',
-            '',
-            '# Mount required filesystems',
-            'mkdir -p /dev/pts /proc',
-            'mount -t devpts devpts /dev/pts || true',
-            'mount -t proc proc /proc || true',
+            'mkdir -p /run',
             '',
             '# Update package lists',
             'apt-get clean',
@@ -530,7 +512,7 @@ class FirecrackerService {
                 lines.push(
                     '',
                     '# Install Node.js',
-                    `curl -fsSL https://deb.nodesource.com/setup_${version}.x | sh`,
+                    `curl -fsSL https://deb.nodesource.com/setup_${version}.x | bash -`,
                     'apt-get install -y nodejs',
                     '',
                     '# Verify Node.js installation',
@@ -542,30 +524,17 @@ class FirecrackerService {
                 break;
         }
 
-        // Add common final steps
+        // Add cleanup steps
         lines.push(
             '',
-            '# Create app directory',
-            'mkdir -p /app',
-            'chmod 755 /app',
-            '',
-            '# Install any requirements if present',
-            'if [ -f /app/requirements.txt ]; then',
-            '    pip install -r /app/requirements.txt',
-            'fi',
-            '',
-            '# Cleanup to save space',
+            '# Cleanup',
             'apt-get clean',
             'rm -rf /var/lib/apt/lists/*',
-            '',
-            '# Unmount filesystems',
-            'umount /dev/pts || true',
-            'umount /proc || true',
             '',
             'exit 0'
         );
 
-        // Join lines with Unix line endings and ensure no trailing whitespace
+        // Join lines with Unix line endings
         return lines.map(line => line.trimRight()).join('\n');
     }
 
