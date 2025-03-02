@@ -1,41 +1,42 @@
-FROM alpine:latest
+FROM alpine:latest as rootfs
 
 # Install required packages
-RUN apk add --no-cache e2fsprogs util-linux
+RUN apk add --no-cache openrc util-linux
 
-WORKDIR /build
-
-# Create and format the rootfs image
-RUN set -ex && \
-    # Create the ext4 file
-    dd if=/dev/zero of=base.ext4 bs=1M count=200 && \
-    mkfs.ext4 base.ext4 && \
-    mkdir -p /mnt/rootfs && \
-    # Create loop devices if they don't exist
-    for i in $(seq 0 7); do \
-        if [ ! -e /dev/loop$i ]; then \
-            mknod -m 0660 /dev/loop$i b 7 $i; \
-        fi; \
-    done && \
-    # Setup loop device and mount
-    LOOP_DEV=$(losetup -f) && \
-    losetup $LOOP_DEV base.ext4 && \
-    mount $LOOP_DEV /mnt/rootfs && \
-    # Install required packages and setup
-    apk add --no-cache openrc util-linux && \
-    ln -s agetty /etc/init.d/agetty.ttyS0 && \
+# Set up basic system configuration
+RUN ln -s agetty /etc/init.d/agetty.ttyS0 && \
     echo ttyS0 > /etc/securetty && \
     rc-update add agetty.ttyS0 default && \
     rc-update add devfs boot && \
     rc-update add procfs boot && \
-    rc-update add sysfs boot && \
-    # Copy system files to rootfs
-    for d in bin etc lib root sbin usr; do tar c "/$d" | tar x -C /mnt/rootfs; done && \
-    # Create necessary directories
-    for dir in dev proc run sys var; do mkdir /mnt/rootfs/${dir}; done && \
-    # Cleanup
-    umount /mnt/rootfs && \
-    losetup -d $LOOP_DEV
+    rc-update add sysfs boot
+
+# Create rootfs structure
+RUN mkdir -p /rootfs && \
+    for d in bin etc lib root sbin usr; do \
+        cp -a /$d /rootfs/; \
+    done && \
+    for dir in dev proc run sys var; do \
+        mkdir -p /rootfs/${dir}; \
+    done
+
+FROM alpine:latest
+
+# Install required packages
+RUN apk add --no-cache e2fsprogs
+
+WORKDIR /build
+
+# Copy the rootfs from first stage
+COPY --from=rootfs /rootfs /rootfs
+
+# Create script to build ext4 image
+RUN echo '#!/bin/sh' > /build.sh && \
+    echo 'set -ex' >> /build.sh && \
+    echo 'dd if=/dev/zero of=base.ext4 bs=1M count=200' >> /build.sh && \
+    echo 'mkfs.ext4 -F -d /rootfs base.ext4' >> /build.sh && \
+    echo 'cp base.ext4 /output/base.ext4' >> /build.sh && \
+    chmod +x /build.sh
 
 VOLUME /output
-CMD cp base.ext4 /output/base.ext4 
+CMD ["/build.sh"] 
