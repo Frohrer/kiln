@@ -367,7 +367,15 @@ class FirecrackerService {
         try {
             // Write the script directly to the root of the mount point
             const scriptPath = path.join(mountPoint, 'setup.sh');
-            fs.writeFileSync(scriptPath, setupScript, { mode: 0o755 });
+            logger.debug(`Writing script to: ${scriptPath}`);
+            
+            // Write script with Unix line endings
+            fs.writeFileSync(scriptPath, setupScript.replace(/\r\n/g, '\n'), { mode: 0o755, encoding: 'utf8' });
+            
+            // Double check the script exists
+            if (!fs.existsSync(scriptPath)) {
+                throw new Error(`Failed to create script at ${scriptPath}`);
+            }
             
             // Ensure script has proper permissions both from host and chroot perspective
             execSync(`chmod 755 ${scriptPath}`);
@@ -388,15 +396,35 @@ class FirecrackerService {
             // Also check the script content was written correctly
             logger.debug('Script content verification:', execSync(`cat ${scriptPath}`).toString());
 
+            // Verify the script is visible inside the chroot
+            try {
+                execSync(`chroot ${mountPoint} ls -la /setup.sh`);
+                logger.debug('Script is visible inside chroot');
+            } catch (error) {
+                logger.error('Script is not visible inside chroot:', error.message);
+                throw new Error('Script is not accessible inside chroot environment');
+            }
+
             try {
                 // Execute setup in chroot with error output
                 logger.debug('Executing chroot command...');
-                const result = execSync(`chroot ${mountPoint} /setup.sh 2>&1`);
+                const result = execSync(`chroot ${mountPoint} /setup.sh 2>&1`, {
+                    maxBuffer: 10 * 1024 * 1024 // 10MB buffer for output
+                });
                 logger.debug('Chroot execution output:', result.toString());
             } catch (error) {
                 logger.error(`Chroot execution failed: ${error.message}`);
                 if (error.stdout) logger.error('Stdout:', error.stdout.toString());
                 if (error.stderr) logger.error('Stderr:', error.stderr.toString());
+                
+                // Try to get more information about the failure
+                try {
+                    logger.debug('Mount status:', execSync('mount').toString());
+                    logger.debug('Chroot environment:', execSync(`ls -la ${mountPoint}`).toString());
+                } catch (debugError) {
+                    logger.error('Failed to get debug information:', debugError.message);
+                }
+                
                 throw error;
             }
         } finally {
@@ -405,6 +433,7 @@ class FirecrackerService {
                 const scriptPath = path.join(mountPoint, 'setup.sh');
                 if (fs.existsSync(scriptPath)) {
                     fs.unlinkSync(scriptPath);
+                    logger.debug('Cleaned up setup script');
                 }
             } catch (error) {
                 logger.warn(`Failed to remove setup script: ${error.message}`);
@@ -415,9 +444,15 @@ class FirecrackerService {
     generateSetupScript(language, version) {
         // Start with shebang and basic setup
         const lines = [
-            '#!/bin/bash',
+            '#!/bin/sh',  // Use sh instead of bash as it's more likely to be available
             'set -ex',
             'export DEBIAN_FRONTEND=noninteractive',
+            '',
+            '# Ensure basic shell utilities are available',
+            'if [ ! -f /bin/sh ] || [ ! -f /bin/mount ]; then',
+            '    echo "Basic utilities missing from chroot environment"',
+            '    exit 1',
+            'fi',
             '',
             '# Setup DNS',
             'echo "nameserver 8.8.8.8" > /etc/resolv.conf',
@@ -442,6 +477,7 @@ class FirecrackerService {
             'fi',
             '',
             '# Mount required filesystems',
+            'mkdir -p /dev/pts /proc',
             'mount -t devpts devpts /dev/pts || true',
             'mount -t proc proc /proc || true',
             '',
@@ -468,7 +504,7 @@ class FirecrackerService {
                     `apt-get install -y python${version} python${version}-dev python${version}-distutils python${version}-venv`,
                     '',
                     '# Verify Python installation',
-                    `if ! command -v python${version} &> /dev/null; then`,
+                    `if ! command -v python${version} > /dev/null 2>&1; then`,
                     `    echo "Python ${version} installation failed"`,
                     '    exit 1',
                     'fi',
@@ -483,7 +519,7 @@ class FirecrackerService {
                     `ln -sf /usr/local/bin/pip${version} /usr/bin/pip`,
                     '',
                     '# Verify pip installation',
-                    'if ! command -v pip &> /dev/null; then',
+                    'if ! command -v pip > /dev/null 2>&1; then',
                     '    echo "pip installation failed"',
                     '    exit 1',
                     'fi'
@@ -493,11 +529,11 @@ class FirecrackerService {
                 lines.push(
                     '',
                     '# Install Node.js',
-                    `curl -fsSL https://deb.nodesource.com/setup_${version}.x | bash -`,
+                    `curl -fsSL https://deb.nodesource.com/setup_${version}.x | sh`,
                     'apt-get install -y nodejs',
                     '',
                     '# Verify Node.js installation',
-                    'if ! command -v node &> /dev/null; then',
+                    'if ! command -v node > /dev/null 2>&1; then',
                     '    echo "Node.js installation failed"',
                     '    exit 1',
                     'fi'
@@ -528,8 +564,8 @@ class FirecrackerService {
             'exit 0'
         );
 
-        // Join lines with Unix line endings
-        return lines.join('\n');
+        // Join lines with Unix line endings and ensure no trailing whitespace
+        return lines.map(line => line.trimRight()).join('\n');
     }
 
     async removeImage(imageId) {
