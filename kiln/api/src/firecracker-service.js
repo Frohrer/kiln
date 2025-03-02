@@ -5,6 +5,9 @@ const { v4: uuidv4 } = require('uuid');
 const logger = require('logplease').create('firecracker-service');
 const runtime = require('./runtime');
 const fetch = require('node-fetch');
+const http = require('http');
+const { Agent } = require('http');
+const { createConnection } = require('net');
 
 class FirecrackerService {
     constructor() {
@@ -289,43 +292,75 @@ class FirecrackerService {
     }
 
     async configureVM(socketPath, config) {
-        // Helper function to make API calls to Firecracker
+        // Helper function to make API calls to Firecracker via Unix socket
         const makeRequest = async (method, path, body) => {
-            const response = await fetch(`http://localhost/${path}`, {
-                method,
-                body: body ? JSON.stringify(body) : undefined,
-                headers: {
-                    'Content-Type': 'application/json'
+            return new Promise((resolve, reject) => {
+                const agent = new Agent({
+                    createConnection: () => createConnection(socketPath)
+                });
+
+                const options = {
+                    agent,
+                    method,
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                };
+
+                if (body) {
+                    const bodyStr = JSON.stringify(body);
+                    options.headers['Content-Length'] = Buffer.byteLength(bodyStr);
                 }
+
+                const req = http.request(options, (res) => {
+                    let data = '';
+                    res.on('data', chunk => data += chunk);
+                    res.on('end', () => {
+                        if (res.statusCode >= 200 && res.statusCode < 300) {
+                            resolve(data ? JSON.parse(data) : undefined);
+                        } else {
+                            reject(new Error(`Firecracker API request failed with status ${res.statusCode}: ${data}`));
+                        }
+                    });
+                });
+
+                req.on('error', reject);
+
+                if (body) {
+                    req.write(JSON.stringify(body));
+                }
+                req.end();
             });
-            
-            if (!response.ok) {
-                throw new Error(`Firecracker API request failed: ${response.statusText}`);
-            }
-            
-            return response;
         };
 
-        // Configure boot source
-        await makeRequest('PUT', '/boot-source', config.boot_source);
+        // Wait for the socket to be available
+        await new Promise((resolve) => setTimeout(resolve, 1000));
 
-        // Configure drives
-        for (const drive of config.drives) {
-            await makeRequest('PUT', `/drives/${drive.drive_id}`, drive);
-        }
+        try {
+            // Configure boot source
+            await makeRequest('PUT', '/boot-source', config.boot_source);
 
-        // Configure machine
-        await makeRequest('PUT', '/machine-config', config.machine_config);
-
-        // Configure network if specified
-        if (config.network_interfaces) {
-            for (const network of config.network_interfaces) {
-                await makeRequest('PUT', `/network-interfaces/${network.iface_id}`, network);
+            // Configure drives
+            for (const drive of config.drives) {
+                await makeRequest('PUT', `/drives/${drive.drive_id}`, drive);
             }
-        }
 
-        // Start the VM
-        await makeRequest('PUT', '/actions', { action_type: 'InstanceStart' });
+            // Configure machine
+            await makeRequest('PUT', '/machine-config', config.machine_config);
+
+            // Configure network if specified
+            if (config.network_interfaces) {
+                for (const network of config.network_interfaces) {
+                    await makeRequest('PUT', `/network-interfaces/${network.iface_id}`, network);
+                }
+            }
+
+            // Start the VM
+            await makeRequest('PUT', '/actions', { action_type: 'InstanceStart' });
+        } catch (error) {
+            logger.error(`Failed to configure VM: ${error}`);
+            throw error;
+        }
     }
 
     async stopVM(vmId) {
@@ -335,30 +370,44 @@ class FirecrackerService {
         }
 
         try {
-            // Send shutdown signal via API
-            const response = await fetch(`http://localhost/${instance.socket}/actions`, {
-                method: 'PUT',
-                body: JSON.stringify({ action_type: 'SendCtrlAltDel' }),
-                headers: {
-                    'Content-Type': 'application/json'
-                }
+            const agent = new Agent({
+                createConnection: () => createConnection(instance.socket)
             });
-            
-            if (!response.ok) {
-                throw new Error(`Failed to send shutdown signal: ${response.statusText}`);
-            }
-            
+
+            const options = {
+                agent,
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Content-Length': Buffer.byteLength(JSON.stringify({ action_type: 'SendCtrlAltDel' }))
+                }
+            };
+
+            await new Promise((resolve, reject) => {
+                const req = http.request(options, (res) => {
+                    if (res.statusCode >= 200 && res.statusCode < 300) {
+                        resolve();
+                    } else {
+                        reject(new Error(`Failed to send shutdown signal: ${res.statusCode}`));
+                    }
+                });
+
+                req.on('error', reject);
+                req.write(JSON.stringify({ action_type: 'SendCtrlAltDel' }));
+                req.end();
+            });
+
             // Wait for VM to shutdown
             await new Promise(resolve => setTimeout(resolve, 5000));
-            
+
             // Force kill if still running
             instance.process.kill();
-            
+
             // Clean up socket file
             if (fs.existsSync(instance.socket)) {
                 fs.unlinkSync(instance.socket);
             }
-            
+
             this.vmInstances.delete(vmId);
             return true;
         } catch (error) {
