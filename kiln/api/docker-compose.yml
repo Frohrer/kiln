@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  kernel-builder:
+    build:
+      context: .
+      dockerfile: Dockerfile.kernel-builder
+    volumes:
+      - kernel-data:/output
+    profiles:
+      - build-kernel
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - kernel-data:/var/lib/firecracker/kernels
+    ports:
+      - "2000:2000"
+      - "2020:2020"
+    privileged: true  # Required for KVM and mounting operations
+
+volumes:
+  kernel-data: 
