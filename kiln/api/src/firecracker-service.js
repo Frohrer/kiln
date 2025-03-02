@@ -207,37 +207,37 @@ class FirecrackerService {
         
         try {
             // Create a new image with more space (4GB)
-            execSync(`/usr/local/bin/run-as-root.sh dd if=/dev/zero of=${imagePath} bs=1M count=4096`);
-            execSync(`/usr/local/bin/run-as-root.sh mkfs.ext4 ${imagePath}`);
+            execSync(`dd if=/dev/zero of=${imagePath} bs=1M count=4096`);
+            execSync(`mkfs.ext4 ${imagePath}`);
             
             // Create mount points
-            execSync(`/usr/local/bin/run-as-root.sh mkdir -p ${mountPoint}`);
-            execSync(`/usr/local/bin/run-as-root.sh mkdir -p ${baseRootfsMount}`);
+            execSync(`mkdir -p ${mountPoint}`);
+            execSync(`mkdir -p ${baseRootfsMount}`);
 
             try {
                 // Mount the new image
-                execSync(`/usr/local/bin/run-as-root.sh mount -o loop ${imagePath} ${mountPoint}`);
+                execSync(`mount -o loop ${imagePath} ${mountPoint}`);
 
                 try {
                     // Mount base rootfs and copy files
-                    execSync(`/usr/local/bin/run-as-root.sh mount -o loop ${baseRootfsPath} ${baseRootfsMount}`);
-                    execSync(`/usr/local/bin/run-as-root.sh cp -a ${baseRootfsMount}/. ${mountPoint}/`);
+                    execSync(`mount -o loop ${baseRootfsPath} ${baseRootfsMount}`);
+                    execSync(`cp -a ${baseRootfsMount}/. ${mountPoint}/`);
                     
                     // Ensure all processes are done with the mount before unmounting
                     execSync('sync');
-                    execSync(`/usr/local/bin/run-as-root.sh fuser -k ${baseRootfsMount} || true`);
-                    execSync(`/usr/local/bin/run-as-root.sh umount ${baseRootfsMount}`);
+                    execSync(`fuser -k ${baseRootfsMount} || true`);
+                    execSync(`umount ${baseRootfsMount}`);
 
                     // Create necessary directories
-                    execSync(`/usr/local/bin/run-as-root.sh mkdir -p ${mountPoint}/app`);
-                    execSync(`/usr/local/bin/run-as-root.sh mkdir -p ${mountPoint}/var/cache/apt/archives`);
-                    execSync(`/usr/local/bin/run-as-root.sh mkdir -p ${mountPoint}/var/lib/apt/lists`);
+                    execSync(`mkdir -p ${mountPoint}/app`);
+                    execSync(`mkdir -p ${mountPoint}/var/cache/apt/archives`);
+                    execSync(`mkdir -p ${mountPoint}/var/lib/apt/lists`);
 
                     // Copy files to the image
                     for (const file of files) {
                         const filePath = path.join(mountPoint, 'app', file.name);
                         fs.writeFileSync(filePath, file.content);
-                        execSync(`/usr/local/bin/run-as-root.sh chmod 755 ${filePath}`);
+                        execSync(`chmod 755 ${filePath}`);
                     }
 
                     // Setup language-specific environment
@@ -271,7 +271,7 @@ class FirecrackerService {
                     // Write manifest file
                     const manifestPath = path.join(mountPoint, '.ppman-installed');
                     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
-                    execSync(`/usr/local/bin/run-as-root.sh chmod 644 ${manifestPath}`);
+                    execSync(`chmod 644 ${manifestPath}`);
 
                     // Register the runtime
                     runtime.load_package(imagePath);
@@ -292,7 +292,7 @@ class FirecrackerService {
         } catch (error) {
             // Cleanup on failure
             if (fs.existsSync(imagePath)) {
-                execSync(`/usr/local/bin/run-as-root.sh rm -f ${imagePath}`);
+                execSync(`rm -f ${imagePath}`);
             }
             logger.error(`Failed to build image: ${error}`);
             throw error;
@@ -310,7 +310,7 @@ class FirecrackerService {
                 if (!mountInfo.includes(mountPath)) {
                     logger.debug(`${mountPath} is not mounted`);
                     try {
-                        execSync(`/usr/local/bin/run-as-root.sh rmdir ${mountPath}`);
+                        execSync(`rmdir ${mountPath}`);
                     } catch (error) {
                         logger.warn(`Could not remove directory ${mountPath}: ${error.message}`);
                     }
@@ -322,7 +322,7 @@ class FirecrackerService {
                 
                 // Try to kill any processes using the mount
                 try {
-                    execSync(`/usr/local/bin/run-as-root.sh fuser -k ${mountPath} 2>/dev/null || true`);
+                    execSync(`fuser -k ${mountPath} 2>/dev/null || true`);
                     // Wait a bit for processes to die
                     await new Promise(resolve => setTimeout(resolve, 1000));
                 } catch (error) {
@@ -331,12 +331,12 @@ class FirecrackerService {
                 
                 // Try unmounting with increasing force
                 try {
-                    execSync(`/usr/local/bin/run-as-root.sh umount ${mountPath}`);
+                    execSync(`umount ${mountPath}`);
                 } catch (error) {
                     try {
-                        execSync(`/usr/local/bin/run-as-root.sh umount -f ${mountPath}`);
+                        execSync(`umount -f ${mountPath}`);
                     } catch (error) {
-                        execSync(`/usr/local/bin/run-as-root.sh umount -l ${mountPath}`);
+                        execSync(`umount -l ${mountPath}`);
                     }
                 }
                 
@@ -344,7 +344,7 @@ class FirecrackerService {
                 await new Promise(resolve => setTimeout(resolve, 1000));
                 
                 // Try to remove the mount point
-                execSync(`/usr/local/bin/run-as-root.sh rmdir ${mountPath}`);
+                execSync(`rmdir ${mountPath}`);
                 logger.debug(`Successfully cleaned up mount point ${mountPath}`);
                 return;
             } catch (error) {
