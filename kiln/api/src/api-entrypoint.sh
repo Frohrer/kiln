@@ -48,66 +48,56 @@ verify_kvm() {
         echo "Loading KVM modules..."
         modprobe kvm
         if [ -e /dev/cpu/*/cpuid ]; then
-            # Load the appropriate module based on CPU vendor
-            if grep -q "^vendor_id.*Intel" /proc/cpuinfo; then
+            if grep -q -w vmx /proc/cpuinfo; then
                 modprobe kvm_intel
-            elif grep -q "^vendor_id.*AMD" /proc/cpuinfo; then
+            elif grep -q -w svm /proc/cpuinfo; then
                 modprobe kvm_amd
             fi
         fi
     fi
 }
 
-# Function to verify required files
+# Function to verify required files exist
 verify_files() {
     echo "Verifying required files..."
     
-    # Check kernel
+    # Check kernel image
     if [ ! -f /var/lib/firecracker/kernels/vmlinux ]; then
         echo "Error: Kernel image not found at /var/lib/firecracker/kernels/vmlinux"
-        echo "Please run: docker-compose --profile build-kernel up kernel-builder"
         exit 1
     fi
     
-    # Check rootfs
+    # Check base rootfs
     if [ ! -f /var/lib/firecracker/rootfs/base.ext4 ]; then
         echo "Error: Base rootfs not found at /var/lib/firecracker/rootfs/base.ext4"
-        echo "Please run: docker-compose --profile build-rootfs up rootfs-builder"
         exit 1
     fi
-    
-    echo "All required files present"
 }
 
-# Run setup tasks as root
-if [ "$(id -u)" = "0" ]; then
-    # Install dependencies if needed
-    if ! command -v curl &> /dev/null || ! command -v lsmod &> /dev/null; then
-        install_dependencies
-    fi
-
-    # Install Firecracker if needed
-    if ! check_firecracker; then
-        install_firecracker
-    fi
-
-    # Verify KVM setup
-    verify_kvm
-
-    # Ensure directories exist and have correct permissions
+# Function to setup directories
+setup_directories() {
+    echo "Setting up directories..."
     mkdir -p /var/lib/firecracker/{kernels,rootfs,images}
-    mkdir -p /kiln
-    chown -R kiln:kiln /var/lib/firecracker /kiln
-    chmod -R 755 /var/lib/firecracker /kiln
+    chmod -R 777 /var/lib/firecracker
+    mkdir -p /tmp/mount-python-3.12
+    chmod -R 777 /tmp/mount-python-3.12
+}
 
-    # Verify required files
-    verify_files
+# Main execution
+echo "Starting API entrypoint script..."
 
-    # Drop privileges and run the actual application
-    exec gosu kiln "$0" "$@"
-else
-    # Application code here (running as kiln user)
-    echo "Starting Kiln API service..."
-    cd /kiln_api
-    exec node src/index.js
+# Install dependencies if needed
+if ! check_firecracker; then
+    install_dependencies
+    install_firecracker
 fi
+
+# Setup and verify environment
+verify_kvm
+setup_directories
+verify_files
+
+# Start the API server
+echo "Starting API server..."
+cd /kiln_api
+exec node src/api.js
