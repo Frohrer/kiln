@@ -22,16 +22,16 @@ services:
             - "2020:2020"
         networks:
             - kiln-network
-    repo:
-        build: ./kiln/repo/.
-        container_name: kiln_repo
-        privileged: true
-        ports:
-            - "8000:8000"
-        networks:
-            - kiln-network
-        volumes:
-            - kiln_repo_data:/app/packages
+    # repo:
+    #     build: ./kiln/repo/.
+    #     container_name: kiln_repo
+    #     privileged: true
+    #     ports:
+    #         - "8000:8000"
+    #     networks:
+    #         - kiln-network
+    #     volumes:
+    #         - kiln_repo_data:/app/packages
     ui:
         build: ./ui/
         container_name: kiln_ui

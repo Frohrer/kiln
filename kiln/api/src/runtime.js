@@ -8,7 +8,7 @@ const path = require("path");
 const runtimes = [];
 
 class Runtime {
-	constructor({ language, version, aliases, pkgdir, runtime, timeouts, cpu_times, memory_limits, max_process_count, max_open_files, max_file_size, output_max_size }) {
+	constructor({ language, version, aliases, pkgdir, runtime, timeouts, cpu_times, memory_limits, max_process_count, max_open_files, max_file_size, output_max_size, vmImage }) {
 		this.language = language;
 		this.version = version;
 		this.aliases = aliases || [];
@@ -21,6 +21,7 @@ class Runtime {
 		this.max_open_files = max_open_files;
 		this.max_file_size = max_file_size;
 		this.output_max_size = output_max_size;
+		this.vmImage = vmImage; // Path to Firecracker VM image
 	}
 
 	static compute_single_limit(language_name, limit_name, language_limit_overrides) {
@@ -49,6 +50,32 @@ class Runtime {
 	}
 
 	static load_package(package_dir) {
+		// Support both traditional packages and Firecracker VM images
+		if (package_dir.endsWith('.ext4')) {
+			// This is a Firecracker VM image
+			const filename = path.basename(package_dir, '.ext4');
+			const [language, version] = filename.split('-');
+			
+			if (!language || !version) {
+				logger.error(`Invalid VM image filename format: ${filename}`);
+				return;
+			}
+
+			runtimes.push(
+				new Runtime({
+					language,
+					version: semver.parse(version),
+					aliases: [],
+					vmImage: package_dir,
+					...Runtime.compute_all_limits(language),
+				})
+			);
+
+			logger.debug(`Registered Firecracker runtime ${language}-${version}`);
+			return;
+		}
+
+		// Traditional package loading
 		let info = JSON.parse(fss.read_file_sync(path.join(package_dir, "pkg-info.json")));
 
 		let { language, version, build_platform, aliases, provides, limit_overrides } = info;

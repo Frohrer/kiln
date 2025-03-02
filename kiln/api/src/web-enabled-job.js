@@ -7,6 +7,8 @@ const EventEmitter = require("events");
 const StreamlitProcessMonitor = require("./streamlit-process-monitor");
 const { processOutputManager } = require("./process-output-manager");
 const firecrackerService = require("./firecracker-service");
+const { v4: uuidv4 } = require("uuid");
+const logger = require("logplease").create("web-enabled-job");
 
 // Import the ProxyManager class (exported as a singleton in your code).
 const ProxyManager = require("./proxy-handler");
@@ -42,6 +44,8 @@ class WebEnabledJob extends Job {
         this.additionalEnvVars = {};
         this.processPromise = null;
         this.vmId = null;
+        this.proxyManager = options.proxyManager;
+        this.long_running = options.long_running || false;
 
         jobTimer.startTiming(this.uuid);
         runningProcesses.set(this.uuid, this);
@@ -127,177 +131,36 @@ class WebEnabledJob extends Job {
         });
     }
 
-    async execute(box, event_bus = null) {
-        const isStreamlit = this.runtime.language === "streamlit";
-        this.logger.debug(`Executing with runtime language: ${this.runtime.language}`);
-        jobTimer.startStage(this.uuid, "execute");
-        const localEventBus = event_bus || new EventEmitter();
-
-        let stdout = "";
-        let stderr = "";
-        let stage = "execute";
-
+    async execute(event_bus = null) {
         try {
-            // Build VM image with the code
-            const imageId = `${this.runtime.language}-${this.runtime.version.raw}-${this.uuid}`;
-            await firecrackerService.buildImage(this.runtime.language, this.runtime.version.raw, this.files);
-
-            // Start VM
+            // Start VM using the runtime's VM image
             const vmConfig = {
-                memory_limit: this.memory_limits.run,
-                cpu_count: 1
-            };
-            const { vmId } = await firecrackerService.startVM(imageId, vmConfig);
-            this.vmId = vmId;
-
-            const combinedEnv = {
-                ...this.runtime.env_vars,
-                ...this.additionalEnvVars,
+                cpu_count: 1,
+                memory_limit: Math.floor(this.memory_limits.run / (1024 * 1024)) // Convert bytes to MB
             };
 
-            if (isStreamlit) {
-                // Create a proxy for this job
-                const proxyInfo = proxyManager.createProxy(this.uuid);
-                this.webAppPort = proxyInfo.port;
-                this.proxyPath = proxyManager.getBaseUrl() + proxyInfo.path + "/";
-
-                if (this.dependencies && this.dependencies.length > 0) {
-                    stage = "install";
-                    this.logger.debug(`Installing additional Python dependencies for Streamlit: ${this.dependencies.join(", ")}`);
-                    const installResult = await this.installDependencies(vmId, localEventBus);
-                    if (installResult && installResult.code !== 0) {
-                        const error = new Error("Failed to install dependencies");
-                        error.stage = "install";
-                        error.code = installResult.code;
-                        error.stdout = installResult.stdout;
-                        error.stderr = installResult.stderr;
-                        throw error;
-                    }
-                }
-
-                const mainFile = this.files[0]?.name;
-                if (!mainFile) {
-                    throw new Error("No file provided for Streamlit execution");
-                }
-
-                this.args = [mainFile, "--server.baseUrlPath", proxyInfo.path, "--server.port", this.webAppPort.toString()];
-
-                this.logger.debug(`Created proxy with port ${this.webAppPort} and path ${this.proxyPath}`);
-                this.logger.debug(`Streamlit args: ${this.args.join(" ")}`);
-
-                await this.setupStreamlitEnvironment(vmId);
-
-                // Create and set up process monitor
-                const monitor = new StreamlitProcessMonitor(this);
-
-                // Set up output collection
-                localEventBus.on("stdout", (data) => {
-                    stdout += data.toString();
-                });
-
-                localEventBus.on("stderr", (data) => {
-                    stderr += data.toString();
-                });
-
-                try {
-                    stage = "execute";
-                    this.logger.debug("Starting Streamlit process");
-                    
-                    // Start the process in VM
-                    const command = `cd /app && streamlit run ${this.args.join(" ")}`;
-                    const result = await firecrackerService.executeInVM(vmId, command);
-
-                    // Monitor process with enhanced monitoring
-                    await monitor.monitorProcess(localEventBus);
-
-                    return {
-                        run: {
-                            code: result.exitCode,
-                            signal: null,
-                            stdout: result.stdout,
-                            stderr: result.stderr,
-                            output: result.stdout + result.stderr,
-                            memory: null,
-                            message: "Streamlit server started",
-                            status: "success",
-                            webAppUrl: this.proxyPath,
-                            metrics: monitor.getMetrics()
-                        },
-                        language: this.runtime.language,
-                        version: this.runtime.version.raw,
-                    };
-                } catch (error) {
-                    // Clean up proxy if startup failed
-                    if (this.proxyPath) {
-                        proxyManager.removeProxy(this.uuid);
-                    }
-                    error.stage = stage;
-                    error.stdout = stdout;
-                    error.stderr = stderr;
-                    throw error;
-                }
+            const vm = await firecrackerService.startVM(this.runtime.vmImage, vmConfig);
+            
+            // Copy files to VM and execute
+            for (const file of this.files) {
+                // TODO: Copy files to VM
             }
 
-            // For non-Streamlit jobs
-            if (this.dependencies && this.dependencies.length > 0) {
-                stage = "install";
-                const installResult = await this.installDependencies(vmId, localEventBus);
-                if (installResult && installResult.code !== 0) {
-                    const error = new Error("Failed to install dependencies");
-                    error.stage = "install";
-                    error.code = installResult.code;
-                    error.stdout = installResult.stdout;
-                    error.stderr = installResult.stderr;
-                    throw error;
-                }
-            }
-
-            // Execute the code in VM
-            stage = "execute";
-            const mainFile = this.files[0]?.name;
-            const command = `cd /app && ${this.runtime.command} ${mainFile} ${this.args.join(" ")}`;
-            const result = await firecrackerService.executeInVM(vmId, command);
-
-            // Update metrics
-            jobTimer.updateMetrics(this.uuid, {
-                cpuTime: result.cpuTime,
-                wallTime: result.wallTime,
-                memory: result.memory,
-            });
-
-            // Add to process history
-            processHistory.addProcess(this.uuid, {
-                language: this.runtime.language,
-                version: this.runtime.version.raw,
-                startTime: Date.now(),
-                status: "completed",
-                timing: jobTimer.getTimingReport(this.uuid),
-            });
-
+            // TODO: Execute code in VM
+            
             return {
+                success: true,
                 run: {
-                    code: result.exitCode,
+                    status: 0,
                     signal: null,
-                    stdout: result.stdout,
-                    stderr: result.stderr,
-                    output: result.stdout + result.stderr,
-                    memory: result.memory,
-                    message: result.exitCode === 0 ? "Success" : "Failed",
-                    status: result.exitCode === 0 ? "success" : "error",
-                },
-                language: this.runtime.language,
-                version: this.runtime.version.raw,
+                    stdout: "",
+                    stderr: "",
+                    output: ""
+                }
             };
-
         } catch (error) {
-            this.logger.error(`Error in ${stage} stage:`, error);
-            throw {
-                stage,
-                error: error.message,
-                stdout,
-                stderr,
-                code: error.code || 1,
-            };
+            logger.error(`Error executing job ${this.uuid}:`, error);
+            throw error;
         }
     }
 

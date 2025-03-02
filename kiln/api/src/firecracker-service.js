@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const logger = require('logplease').create('firecracker-service');
+const runtime = require('./runtime');
 
 class FirecrackerService {
     constructor() {
@@ -57,6 +58,9 @@ class FirecrackerService {
 
                 // Setup language-specific environment
                 await this.setupLanguageEnvironment(mountPoint, language, version);
+
+                // Register the runtime
+                runtime.load_package(imagePath);
 
                 return {
                     success: true,
