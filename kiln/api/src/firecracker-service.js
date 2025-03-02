@@ -58,47 +58,63 @@ class FirecrackerService {
             execSync(`dd if=/dev/zero of=${imagePath} bs=1M count=4096`);
             execSync(`mkfs.ext4 ${imagePath}`);
             
-            // Mount the image
+            // Create mount points
             const mountPoint = `/tmp/mount-${imageId}`;
+            const baseRootfsMount = `/tmp/base-rootfs`;
             fs.mkdirSync(mountPoint, { recursive: true });
-            execSync(`mount -o loop ${imagePath} ${mountPoint}`);
+            fs.mkdirSync(baseRootfsMount, { recursive: true });
 
             try {
-                // Copy base system files from base rootfs
-                execSync(`mount -o loop ${baseRootfsPath} /tmp/base-rootfs`);
-                execSync(`cp -a /tmp/base-rootfs/. ${mountPoint}/`);
-                execSync(`umount /tmp/base-rootfs`);
+                // Mount the new image
+                execSync(`mount -o loop ${imagePath} ${mountPoint}`);
 
-                // Create necessary directories
-                execSync(`mkdir -p ${mountPoint}/app`);
-                execSync(`mkdir -p ${mountPoint}/var/cache/apt/archives`);
-                execSync(`mkdir -p ${mountPoint}/var/lib/apt/lists`);
-
-                // Copy files to the image
-                for (const file of files) {
-                    const filePath = path.join(mountPoint, 'app', file.name);
-                    fs.writeFileSync(filePath, file.content);
-                    fs.chmodSync(filePath, 0o755); // Make files executable
-                }
-
-                // Setup language-specific environment
-                await this.setupLanguageEnvironment(mountPoint, language, version);
-
-                // Register the runtime
-                runtime.load_package(imagePath);
-
-                return {
-                    success: true,
-                    imageId,
-                    path: imagePath
-                };
-            } finally {
-                // Always try to unmount
                 try {
-                    execSync(`umount ${mountPoint}`);
+                    // Mount base rootfs and copy files
+                    execSync(`mount -o loop ${baseRootfsPath} ${baseRootfsMount}`);
+                    execSync(`cp -a ${baseRootfsMount}/. ${mountPoint}/`);
+                    execSync(`umount ${baseRootfsMount}`);
+
+                    // Create necessary directories
+                    execSync(`mkdir -p ${mountPoint}/app`);
+                    execSync(`mkdir -p ${mountPoint}/var/cache/apt/archives`);
+                    execSync(`mkdir -p ${mountPoint}/var/lib/apt/lists`);
+
+                    // Copy files to the image
+                    for (const file of files) {
+                        const filePath = path.join(mountPoint, 'app', file.name);
+                        fs.writeFileSync(filePath, file.content);
+                        fs.chmodSync(filePath, 0o755); // Make files executable
+                    }
+
+                    // Setup language-specific environment
+                    await this.setupLanguageEnvironment(mountPoint, language, version);
+
+                    // Register the runtime
+                    runtime.load_package(imagePath);
+
+                    return {
+                        success: true,
+                        imageId,
+                        path: imagePath
+                    };
+                } finally {
+                    // Clean up base rootfs mount
+                    try {
+                        if (fs.existsSync(baseRootfsMount)) {
+                            execSync(`umount ${baseRootfsMount} 2>/dev/null || true`);
+                            fs.rmdirSync(baseRootfsMount);
+                        }
+                    } catch (error) {
+                        logger.error(`Failed to clean up base rootfs mount: ${error}`);
+                    }
+                }
+            } finally {
+                // Clean up new image mount
+                try {
+                    execSync(`umount ${mountPoint} 2>/dev/null || true`);
                     fs.rmdirSync(mountPoint);
                 } catch (error) {
-                    logger.error(`Failed to unmount image: ${error}`);
+                    logger.error(`Failed to clean up mount point: ${error}`);
                 }
             }
         } catch (error) {
