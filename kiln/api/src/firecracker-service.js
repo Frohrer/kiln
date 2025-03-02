@@ -29,6 +29,23 @@ class FirecrackerService {
         if (!fs.existsSync(baseRootfsPath)) {
             throw new Error('Base rootfs not found');
         }
+
+        // Register existing VM images
+        this.registerExistingImages();
+    }
+
+    registerExistingImages() {
+        try {
+            const files = fs.readdirSync(this.imagesDir);
+            for (const file of files) {
+                if (file.endsWith('.ext4')) {
+                    const imagePath = path.join(this.imagesDir, file);
+                    runtime.load_package(imagePath);
+                }
+            }
+        } catch (error) {
+            logger.error('Failed to register existing images:', error);
+        }
     }
 
     async buildImage(language, version, files) {
@@ -100,11 +117,41 @@ class FirecrackerService {
     generateSetupScript(language, version) {
         let script = '#!/bin/bash\n';
         
+        // Add base system setup
+        script += `
+            # Setup DNS
+            echo "nameserver 8.8.8.8" > /etc/resolv.conf
+            echo "nameserver 8.8.4.4" >> /etc/resolv.conf
+
+            # Setup dpkg directories
+            mkdir -p /var/lib/dpkg
+            touch /var/lib/dpkg/status
+            mkdir -p /var/lib/apt/lists
+            mkdir -p /var/cache/apt/archives/partial
+            mkdir -p /var/lib/dpkg/updates
+            mkdir -p /var/lib/dpkg/info
+            mkdir -p /var/lib/dpkg/alternatives
+            mkdir -p /var/lib/dpkg/parts
+            mkdir -p /var/lib/dpkg/triggers
+            mkdir -p /run/lock
+
+            # Initialize dpkg status
+            if [ ! -f /var/lib/dpkg/status ]; then
+                touch /var/lib/dpkg/status
+                echo "" > /var/lib/dpkg/status
+            fi
+
+            # Update package lists
+            apt-get clean
+            rm -rf /var/lib/apt/lists/*
+            apt-get update
+        `;
+        
         switch(language) {
             case 'python':
                 script += `
-                    apt-get update
-                    apt-get install -y python${version} python${version}-pip
+                    # Install Python and dependencies
+                    DEBIAN_FRONTEND=noninteractive apt-get install -y python${version} python${version}-pip
                     ln -sf /usr/bin/python${version} /usr/bin/python
                     ln -sf /usr/bin/pip${version} /usr/bin/pip
                 `;
@@ -112,7 +159,7 @@ class FirecrackerService {
             case 'nodejs':
                 script += `
                     curl -fsSL https://deb.nodesource.com/setup_${version}.x | bash -
-                    apt-get install -y nodejs
+                    DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
                 `;
                 break;
             // Add more languages as needed

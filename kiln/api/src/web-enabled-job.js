@@ -139,23 +139,36 @@ class WebEnabledJob extends Job {
                 memory_limit: Math.floor(this.memory_limits.run / (1024 * 1024)) // Convert bytes to MB
             };
 
-            const vm = await firecrackerService.startVM(this.runtime.vmImage, vmConfig);
+            // Get the image path from the runtime
+            const imageId = `${this.runtime.language}-${this.runtime.version.raw}`;
             
-            // Copy files to VM and execute
+            // Start the VM
+            const { vmId } = await firecrackerService.startVM(imageId, vmConfig);
+            this.vmId = vmId;
+
+            // Copy files to VM
             for (const file of this.files) {
-                // TODO: Copy files to VM
+                const command = `cat > /app/${file.name} << 'EOF'\n${file.content}\nEOF`;
+                await firecrackerService.executeInVM(vmId, command);
             }
 
-            // TODO: Execute code in VM
+            // Execute the code
+            const mainFile = this.files[0]?.name;
+            if (!mainFile) {
+                throw new Error('No file provided for execution');
+            }
+
+            const command = `cd /app && python ${mainFile}`;
+            const result = await firecrackerService.executeInVM(vmId, command);
             
             return {
                 success: true,
                 run: {
-                    status: 0,
+                    status: result.exitCode,
                     signal: null,
-                    stdout: "",
-                    stderr: "",
-                    output: ""
+                    stdout: result.stdout,
+                    stderr: result.stderr,
+                    output: result.stdout + result.stderr
                 }
             };
         } catch (error) {
