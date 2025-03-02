@@ -186,6 +186,31 @@ class FirecrackerService {
                     // Setup language-specific environment
                     await this.setupLanguageEnvironment(mountPoint, language, version);
 
+                    // Create package manifest
+                    const manifest = {
+                        language,
+                        version,
+                        runtime: language,
+                        aliases: [],
+                        limits: {
+                            compile_timeout: 30000,
+                            run_timeout: 30000,
+                            compile_memory_limit: 512,
+                            run_memory_limit: 512,
+                            compile_cpu_time: 10,
+                            run_cpu_time: 10,
+                            max_process_count: 64,
+                            max_open_files: 1024,
+                            max_file_size: 10485760,
+                            output_max_size: 1048576
+                        }
+                    };
+
+                    // Write manifest file
+                    const manifestPath = path.join(mountPoint, '.ppman-installed');
+                    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+                    fs.chmodSync(manifestPath, 0o644);
+
                     // Register the runtime
                     runtime.load_package(imagePath);
 
