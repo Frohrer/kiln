@@ -106,7 +106,14 @@ class FirecrackerService {
                     try {
                         if (fs.existsSync(baseRootfsMount)) {
                             execSync(`umount ${baseRootfsMount} 2>/dev/null || true`);
-                            fs.rmdirSync(baseRootfsMount);
+                            // Wait a bit before trying to remove the directory
+                            setTimeout(() => {
+                                try {
+                                    fs.rmdirSync(baseRootfsMount);
+                                } catch (e) {
+                                    logger.warn(`Could not remove base rootfs mount point: ${e}`);
+                                }
+                            }, 1000);
                         }
                     } catch (error) {
                         logger.error(`Failed to clean up base rootfs mount: ${error}`);
@@ -116,7 +123,14 @@ class FirecrackerService {
                 // Clean up new image mount
                 try {
                     execSync(`umount ${mountPoint} 2>/dev/null || true`);
-                    fs.rmdirSync(mountPoint);
+                    // Wait a bit before trying to remove the directory
+                    setTimeout(() => {
+                        try {
+                            fs.rmdirSync(mountPoint);
+                        } catch (e) {
+                            logger.warn(`Could not remove mount point: ${e}`);
+                        }
+                    }, 1000);
                 } catch (error) {
                     logger.error(`Failed to clean up mount point: ${error}`);
                 }
@@ -243,9 +257,35 @@ class FirecrackerService {
         const socketPath = `/tmp/firecracker-${vmId}.sock`;
 
         try {
+            // Remove socket file if it exists
+            if (fs.existsSync(socketPath)) {
+                fs.unlinkSync(socketPath);
+            }
+
             // Start Firecracker process
             const firecracker = spawn('firecracker', ['--api-sock', socketPath]);
             
+            // Wait for the socket file to be created and available
+            await new Promise((resolve, reject) => {
+                const checkSocket = () => {
+                    if (fs.existsSync(socketPath)) {
+                        resolve();
+                    } else {
+                        setTimeout(checkSocket, 100);
+                    }
+                };
+                checkSocket();
+                
+                // Add error handler for the Firecracker process
+                firecracker.on('error', reject);
+                firecracker.stderr.on('data', (data) => {
+                    logger.error(`Firecracker stderr: ${data}`);
+                });
+            });
+
+            // Wait a bit more for Firecracker to be ready
+            await new Promise(resolve => setTimeout(resolve, 1000));
+
             // Configure VM via API
             const vmConfig = {
                 boot_source: {
@@ -265,7 +305,7 @@ class FirecrackerService {
                 },
                 network_interfaces: [{
                     iface_id: 'eth0',
-                    host_dev_name: 'tap0', // This needs to be configured on the host
+                    host_dev_name: 'tap0',
                     guest_mac: 'AA:FC:00:00:00:01'
                 }]
             };
@@ -380,9 +420,10 @@ class FirecrackerService {
             const options = {
                 agent,
                 method: 'PUT',
+                path: '/actions',
                 headers: {
-                    'Content-Type': 'application/json',
-                    'Content-Length': Buffer.byteLength(JSON.stringify({ action_type: 'SendCtrlAltDel' }))
+                    'Accept': '*/*',
+                    'Content-Type': 'application/json'
                 }
             };
 
@@ -396,7 +437,9 @@ class FirecrackerService {
                 });
 
                 req.on('error', reject);
-                req.write(JSON.stringify({ action_type: 'SendCtrlAltDel' }));
+                const body = JSON.stringify({ action_type: 'SendCtrlAltDel' });
+                req.setHeader('Content-Length', Buffer.byteLength(body));
+                req.write(body);
                 req.end();
             });
 
