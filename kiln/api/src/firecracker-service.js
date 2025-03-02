@@ -142,6 +142,11 @@ class FirecrackerService {
     }
 
     async buildImage(language, version, files) {
+        // Normalize version for Python (extract major.minor only)
+        if (language === 'python') {
+            version = version.split('.').slice(0, 2).join('.');
+        }
+        
         const imageId = `${language}-${version}`;
         const imagePath = path.join(this.imagesDir, `${imageId}.ext4`);
         const baseRootfsPath = path.join(this.rootfsDir, 'base.ext4');
@@ -184,7 +189,12 @@ class FirecrackerService {
                     }
 
                     // Setup language-specific environment
-                    await this.setupLanguageEnvironment(mountPoint, language, version);
+                    try {
+                        await this.setupLanguageEnvironment(mountPoint, language, version);
+                    } catch (error) {
+                        logger.error(`Failed to setup language environment: ${error.message}`);
+                        throw new Error(`Failed to setup ${language} ${version} environment: ${error.message}`);
+                    }
 
                     // Create package manifest
                     const manifest = {
@@ -243,24 +253,51 @@ class FirecrackerService {
         const maxRetries = 3;
         for (let i = 0; i < maxRetries; i++) {
             try {
+                // Check if the path is actually mounted
+                const mountInfo = execSync('mount').toString();
+                if (!mountInfo.includes(mountPath)) {
+                    logger.debug(`${mountPath} is not mounted`);
+                    try {
+                        fs.rmdirSync(mountPath);
+                    } catch (error) {
+                        logger.warn(`Could not remove directory ${mountPath}: ${error.message}`);
+                    }
+                    return;
+                }
+
                 // Ensure all processes are done with the mount
                 execSync('sync');
                 
                 // Try to kill any processes using the mount
-                execSync(`fuser -k ${mountPath} || true`);
+                try {
+                    execSync(`fuser -k ${mountPath} 2>/dev/null || true`);
+                    // Wait a bit for processes to die
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                } catch (error) {
+                    logger.debug(`No processes using ${mountPath}`);
+                }
                 
-                // Force unmount if needed
-                execSync(`umount -f ${mountPath} || umount -l ${mountPath} || true`);
+                // Try unmounting with increasing force
+                try {
+                    execSync(`umount ${mountPath}`);
+                } catch (error) {
+                    try {
+                        execSync(`umount -f ${mountPath}`);
+                    } catch (error) {
+                        execSync(`umount -l ${mountPath}`);
+                    }
+                }
                 
-                // Wait a bit before trying to remove the directory
+                // Wait before trying to remove the directory
                 await new Promise(resolve => setTimeout(resolve, 1000));
                 
                 // Try to remove the mount point
                 fs.rmdirSync(mountPath);
+                logger.debug(`Successfully cleaned up mount point ${mountPath}`);
                 return;
             } catch (error) {
                 if (i === maxRetries - 1) {
-                    logger.warn(`Could not cleanup mount point ${mountPath} after ${maxRetries} attempts: ${error}`);
+                    logger.warn(`Could not cleanup mount point ${mountPath} after ${maxRetries} attempts: ${error.message}`);
                 } else {
                     logger.debug(`Retry ${i + 1}/${maxRetries} cleaning up mount point ${mountPath}`);
                     await new Promise(resolve => setTimeout(resolve, 1000));
@@ -282,6 +319,8 @@ class FirecrackerService {
 
     generateSetupScript(language, version) {
         let script = '#!/bin/bash\n';
+        script += 'set -e\n'; // Exit on error
+        script += 'export DEBIAN_FRONTEND=noninteractive\n';
         
         // Add base system setup
         script += `
@@ -308,8 +347,8 @@ class FirecrackerService {
             fi
 
             # Mount required filesystems
-            mount -t devpts devpts /dev/pts
-            mount -t proc proc /proc
+            mount -t devpts devpts /dev/pts || true
+            mount -t proc proc /proc || true
 
             # Update package lists
             apt-get clean
@@ -317,8 +356,8 @@ class FirecrackerService {
             apt-get update
 
             # Install essential packages first
-            DEBIAN_FRONTEND=noninteractive apt-get install -y apt-utils
-            DEBIAN_FRONTEND=noninteractive apt-get install -y software-properties-common gnupg wget ca-certificates
+            apt-get install -y apt-utils
+            apt-get install -y software-properties-common gnupg wget ca-certificates
         `;
         
         switch(language) {
@@ -329,30 +368,58 @@ class FirecrackerService {
                     apt-get update
 
                     # Install Python and dependencies
-                    DEBIAN_FRONTEND=noninteractive apt-get install -y python${version} python${version}-distutils
+                    apt-get install -y python${version} python${version}-dev python${version}-distutils python${version}-venv
+
+                    # Verify Python installation
+                    if ! command -v python${version} &> /dev/null; then
+                        echo "Python ${version} installation failed"
+                        exit 1
+                    fi
 
                     # Install pip
-                    wget https://bootstrap.pypa.io/get-pip.py
-                    python${version} get-pip.py
-                    rm get-pip.py
+                    wget -q https://bootstrap.pypa.io/get-pip.py -O /tmp/get-pip.py
+                    python${version} /tmp/get-pip.py
+                    rm /tmp/get-pip.py
 
                     # Create symlinks
                     ln -sf /usr/bin/python${version} /usr/bin/python
                     ln -sf /usr/local/bin/pip${version} /usr/bin/pip
 
+                    # Verify pip installation
+                    if ! command -v pip &> /dev/null; then
+                        echo "pip installation failed"
+                        exit 1
+                    fi
+
                     # Create app directory
                     mkdir -p /app
                     chmod 755 /app
+
+                    # Install any requirements if present
+                    if [ -f /app/requirements.txt ]; then
+                        pip install -r /app/requirements.txt
+                    fi
                 `;
                 break;
             case 'nodejs':
                 script += `
                     curl -fsSL https://deb.nodesource.com/setup_${version}.x | bash -
-                    DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
+                    apt-get install -y nodejs
+
+                    # Verify Node.js installation
+                    if ! command -v node &> /dev/null; then
+                        echo "Node.js installation failed"
+                        exit 1
+                    fi
 
                     # Create app directory
                     mkdir -p /app
                     chmod 755 /app
+
+                    # Install any dependencies if present
+                    if [ -f /app/package.json ]; then
+                        cd /app && npm install
+                    fi
                 `;
                 break;
         }
@@ -362,6 +429,10 @@ class FirecrackerService {
             # Cleanup to save space
             apt-get clean
             rm -rf /var/lib/apt/lists/*
+
+            # Unmount filesystems
+            umount /dev/pts || true
+            umount /proc || true
         `;
 
         return script;
