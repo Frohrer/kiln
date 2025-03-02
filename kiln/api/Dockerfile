@@ -29,21 +29,17 @@ RUN curl -Lo firecracker https://github.com/firecracker-microvm/firecracker/rele
     chmod +x firecracker && \
     mv firecracker /usr/local/bin/
 
-# Create all required directories and set initial permissions
+# Create directories, set permissions, and download Firecracker assets
 RUN mkdir -p /var/lib/firecracker/{kernels,rootfs,images} && \
     mkdir -p /kiln && \
     chown -R kiln:kiln /var/lib/firecracker /kiln && \
-    chmod -R 755 /var/lib/firecracker /kiln
+    chmod -R 755 /var/lib/firecracker /kiln && \
+    # Download kernel and rootfs
+    wget https://s3.amazonaws.com/spec.ccfc.min/img/quickstart_guide/x86_64/kernels/vmlinux.bin -O /var/lib/firecracker/kernels/vmlinux && \
+    wget https://s3.amazonaws.com/spec.ccfc.min/img/quickstart_guide/x86_64/rootfs/bionic.rootfs.ext4 -O /var/lib/firecracker/rootfs/base.ext4 && \
+    # Ensure proper ownership of downloaded files
+    chown -R kiln:kiln /var/lib/firecracker
 
-# Download Firecracker kernel and rootfs as kiln user
-USER kiln
-RUN cd /var/lib/firecracker/kernels && \
-    wget https://s3.amazonaws.com/spec.ccfc.min/img/quickstart_guide/x86_64/kernels/vmlinux.bin -O vmlinux && \
-    cd /var/lib/firecracker/rootfs && \
-    wget https://s3.amazonaws.com/spec.ccfc.min/img/quickstart_guide/x86_64/rootfs/bionic.rootfs.ext4 -O base.ext4
-
-# Switch back to root for remaining setup
-USER root
 WORKDIR /kiln_api
 COPY ["package.json", "./"]
 RUN npm install
