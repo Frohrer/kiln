@@ -361,15 +361,17 @@ class FirecrackerService {
     async setupLanguageEnvironment(mountPoint, language, version) {
         // Create a script to setup the environment
         const setupScript = this.generateSetupScript(language, version);
-        const scriptPath = path.join(mountPoint, 'setup.sh');
         
-        logger.debug(`Writing setup script to ${scriptPath}`);
-        logger.debug('Setup script content:', setupScript);
+        logger.debug(`Writing setup script content:`, setupScript);
         
         try {
-            // Write the script with proper permissions
+            // Write the script directly to the root of the mount point
+            const scriptPath = path.join(mountPoint, 'setup.sh');
             fs.writeFileSync(scriptPath, setupScript, { mode: 0o755 });
+            
+            // Ensure script has proper permissions both from host and chroot perspective
             execSync(`chmod 755 ${scriptPath}`);
+            execSync(`chown root:root ${scriptPath}`);
             
             // Verify the script exists and is executable
             try {
@@ -382,10 +384,15 @@ class FirecrackerService {
 
             // List the contents of the mount point for debugging
             logger.debug('Mount point contents:', execSync(`ls -la ${mountPoint}`).toString());
+            
+            // Also check the script content was written correctly
+            logger.debug('Script content verification:', execSync(`cat ${scriptPath}`).toString());
 
             try {
                 // Execute setup in chroot with error output
-                execSync(`chroot ${mountPoint} /setup.sh 2>&1`);
+                logger.debug('Executing chroot command...');
+                const result = execSync(`chroot ${mountPoint} /setup.sh 2>&1`);
+                logger.debug('Chroot execution output:', result.toString());
             } catch (error) {
                 logger.error(`Chroot execution failed: ${error.message}`);
                 if (error.stdout) logger.error('Stdout:', error.stdout.toString());
@@ -395,7 +402,10 @@ class FirecrackerService {
         } finally {
             // Clean up the script
             try {
-                fs.unlinkSync(scriptPath);
+                const scriptPath = path.join(mountPoint, 'setup.sh');
+                if (fs.existsSync(scriptPath)) {
+                    fs.unlinkSync(scriptPath);
+                }
             } catch (error) {
                 logger.warn(`Failed to remove setup script: ${error.message}`);
             }
@@ -403,127 +413,123 @@ class FirecrackerService {
     }
 
     generateSetupScript(language, version) {
-        let script = '#!/bin/bash\n';
-        script += 'set -ex\n'; // Exit on error and print commands
-        script += 'export DEBIAN_FRONTEND=noninteractive\n\n';
-        
-        // Add base system setup
-        script += `
-# Setup DNS
-echo "nameserver 8.8.8.8" > /etc/resolv.conf
-echo "nameserver 8.8.4.4" >> /etc/resolv.conf
+        // Start with shebang and basic setup
+        const lines = [
+            '#!/bin/bash',
+            'set -ex',
+            'export DEBIAN_FRONTEND=noninteractive',
+            '',
+            '# Setup DNS',
+            'echo "nameserver 8.8.8.8" > /etc/resolv.conf',
+            'echo "nameserver 8.8.4.4" >> /etc/resolv.conf',
+            '',
+            '# Setup dpkg directories',
+            'mkdir -p /var/lib/dpkg',
+            'touch /var/lib/dpkg/status',
+            'mkdir -p /var/lib/apt/lists',
+            'mkdir -p /var/cache/apt/archives/partial',
+            'mkdir -p /var/lib/dpkg/updates',
+            'mkdir -p /var/lib/dpkg/info',
+            'mkdir -p /var/lib/dpkg/alternatives',
+            'mkdir -p /var/lib/dpkg/parts',
+            'mkdir -p /var/lib/dpkg/triggers',
+            'mkdir -p /run/lock',
+            '',
+            '# Initialize dpkg status',
+            'if [ ! -f /var/lib/dpkg/status ]; then',
+            '    touch /var/lib/dpkg/status',
+            '    echo "" > /var/lib/dpkg/status',
+            'fi',
+            '',
+            '# Mount required filesystems',
+            'mount -t devpts devpts /dev/pts || true',
+            'mount -t proc proc /proc || true',
+            '',
+            '# Update package lists',
+            'apt-get clean',
+            'rm -rf /var/lib/apt/lists/*',
+            'apt-get update',
+            '',
+            '# Install essential packages first',
+            'apt-get install -y apt-utils',
+            'apt-get install -y software-properties-common gnupg wget ca-certificates'
+        ];
 
-# Setup dpkg directories
-mkdir -p /var/lib/dpkg
-touch /var/lib/dpkg/status
-mkdir -p /var/lib/apt/lists
-mkdir -p /var/cache/apt/archives/partial
-mkdir -p /var/lib/dpkg/updates
-mkdir -p /var/lib/dpkg/info
-mkdir -p /var/lib/dpkg/alternatives
-mkdir -p /var/lib/dpkg/parts
-mkdir -p /var/lib/dpkg/triggers
-mkdir -p /run/lock
-
-# Initialize dpkg status
-if [ ! -f /var/lib/dpkg/status ]; then
-    touch /var/lib/dpkg/status
-    echo "" > /var/lib/dpkg/status
-fi
-
-# Mount required filesystems
-mount -t devpts devpts /dev/pts || true
-mount -t proc proc /proc || true
-
-# Update package lists
-apt-get clean
-rm -rf /var/lib/apt/lists/*
-apt-get update
-
-# Install essential packages first
-apt-get install -y apt-utils
-apt-get install -y software-properties-common gnupg wget ca-certificates
-`;
-        
+        // Add language-specific setup
         switch(language) {
             case 'python':
-                script += `
-# Add deadsnakes PPA for Python versions
-add-apt-repository -y ppa:deadsnakes/ppa
-apt-get update
-
-# Install Python and dependencies
-apt-get install -y python${version} python${version}-dev python${version}-distutils python${version}-venv
-
-# Verify Python installation
-if ! command -v python${version} &> /dev/null; then
-    echo "Python ${version} installation failed"
-    exit 1
-fi
-
-# Install pip
-wget -q https://bootstrap.pypa.io/get-pip.py -O /tmp/get-pip.py
-python${version} /tmp/get-pip.py
-rm /tmp/get-pip.py
-
-# Create symlinks
-ln -sf /usr/bin/python${version} /usr/bin/python
-ln -sf /usr/local/bin/pip${version} /usr/bin/pip
-
-# Verify pip installation
-if ! command -v pip &> /dev/null; then
-    echo "pip installation failed"
-    exit 1
-fi
-
-# Create app directory
-mkdir -p /app
-chmod 755 /app
-
-# Install any requirements if present
-if [ -f /app/requirements.txt ]; then
-    pip install -r /app/requirements.txt
-fi
-`;
+                lines.push(
+                    '',
+                    '# Add deadsnakes PPA for Python versions',
+                    'add-apt-repository -y ppa:deadsnakes/ppa',
+                    'apt-get update',
+                    '',
+                    '# Install Python and dependencies',
+                    `apt-get install -y python${version} python${version}-dev python${version}-distutils python${version}-venv`,
+                    '',
+                    '# Verify Python installation',
+                    `if ! command -v python${version} &> /dev/null; then`,
+                    `    echo "Python ${version} installation failed"`,
+                    '    exit 1',
+                    'fi',
+                    '',
+                    '# Install pip',
+                    'wget -q https://bootstrap.pypa.io/get-pip.py -O /tmp/get-pip.py',
+                    `python${version} /tmp/get-pip.py`,
+                    'rm /tmp/get-pip.py',
+                    '',
+                    '# Create symlinks',
+                    `ln -sf /usr/bin/python${version} /usr/bin/python`,
+                    `ln -sf /usr/local/bin/pip${version} /usr/bin/pip`,
+                    '',
+                    '# Verify pip installation',
+                    'if ! command -v pip &> /dev/null; then',
+                    '    echo "pip installation failed"',
+                    '    exit 1',
+                    'fi'
+                );
                 break;
             case 'nodejs':
-                script += `
-# Install Node.js
-curl -fsSL https://deb.nodesource.com/setup_${version}.x | bash -
-apt-get install -y nodejs
-
-# Verify Node.js installation
-if ! command -v node &> /dev/null; then
-    echo "Node.js installation failed"
-    exit 1
-fi
-
-# Create app directory
-mkdir -p /app
-chmod 755 /app
-
-# Install any dependencies if present
-if [ -f /app/package.json ]; then
-    cd /app && npm install
-fi
-`;
+                lines.push(
+                    '',
+                    '# Install Node.js',
+                    `curl -fsSL https://deb.nodesource.com/setup_${version}.x | bash -`,
+                    'apt-get install -y nodejs',
+                    '',
+                    '# Verify Node.js installation',
+                    'if ! command -v node &> /dev/null; then',
+                    '    echo "Node.js installation failed"',
+                    '    exit 1',
+                    'fi'
+                );
                 break;
         }
 
-        // Cleanup
-        script += `
-# Cleanup to save space
-apt-get clean
-rm -rf /var/lib/apt/lists/*
+        // Add common final steps
+        lines.push(
+            '',
+            '# Create app directory',
+            'mkdir -p /app',
+            'chmod 755 /app',
+            '',
+            '# Install any requirements if present',
+            'if [ -f /app/requirements.txt ]; then',
+            '    pip install -r /app/requirements.txt',
+            'fi',
+            '',
+            '# Cleanup to save space',
+            'apt-get clean',
+            'rm -rf /var/lib/apt/lists/*',
+            '',
+            '# Unmount filesystems',
+            'umount /dev/pts || true',
+            'umount /proc || true',
+            '',
+            'exit 0'
+        );
 
-# Unmount filesystems
-umount /dev/pts || true
-umount /proc || true
-
-exit 0
-`;
-
-        return script;
+        // Join lines with Unix line endings
+        return lines.join('\n');
     }
 
     async removeImage(imageId) {
