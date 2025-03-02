@@ -318,5 +318,19 @@ def delete_image_route(image_id):
     delete_image(image_id)
     return redirect(url_for("images_page"))
 
+@app.route('/api/processes')
+def get_processes():
+    """Get list of active processes."""
+    try:
+        response = requests.get(f'{API_BASE}/processes', headers=API_HEADERS, timeout=30)
+        response.raise_for_status()
+        return jsonify(response.json())
+    except requests.exceptions.RequestException as e:
+        logger.error(f"API request error: {str(e)}", exc_info=True)
+        return jsonify({"error": str(e)}), 503
+    except Exception as e:
+        logger.error(f"Error fetching processes: {e}", exc_info=True)
+        return jsonify({"error": "Failed to fetch processes"}), 500
+
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=5000, debug=True)

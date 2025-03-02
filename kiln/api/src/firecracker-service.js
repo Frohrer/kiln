@@ -4,6 +4,7 @@ const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const logger = require('logplease').create('firecracker-service');
 const runtime = require('./runtime');
+const fetch = require('node-fetch');
 
 class FirecrackerService {
     constructor() {
@@ -335,13 +336,17 @@ class FirecrackerService {
 
         try {
             // Send shutdown signal via API
-            await fetch(`http://localhost/${instance.socket}/actions`, {
+            const response = await fetch(`http://localhost/${instance.socket}/actions`, {
                 method: 'PUT',
                 body: JSON.stringify({ action_type: 'SendCtrlAltDel' }),
                 headers: {
                     'Content-Type': 'application/json'
                 }
             });
+            
+            if (!response.ok) {
+                throw new Error(`Failed to send shutdown signal: ${response.statusText}`);
+            }
             
             // Wait for VM to shutdown
             await new Promise(resolve => setTimeout(resolve, 5000));
