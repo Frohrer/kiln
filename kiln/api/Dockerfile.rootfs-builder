@@ -1,40 +1,28 @@
-FROM alpine:latest as rootfs
+FROM debian:buster-slim
 
 # Install required packages
-RUN apk add --no-cache openrc util-linux
-
-# Set up basic system configuration
-RUN ln -s agetty /etc/init.d/agetty.ttyS0 && \
-    echo ttyS0 > /etc/securetty && \
-    rc-update add agetty.ttyS0 default && \
-    rc-update add devfs boot && \
-    rc-update add procfs boot && \
-    rc-update add sysfs boot
-
-# Create rootfs structure
-RUN mkdir -p /rootfs && \
-    for d in bin etc lib root sbin usr; do \
-        cp -a /$d /rootfs/; \
-    done && \
-    for dir in dev proc run sys var; do \
-        mkdir -p /rootfs/${dir}; \
-    done
-
-FROM alpine:latest
-
-# Install required packages
-RUN apk add --no-cache e2fsprogs
+RUN apt-get update && \
+    apt-get install -y \
+    debootstrap \
+    e2fsprogs \
+    systemd-container \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
 
-# Copy the rootfs from first stage
-COPY --from=rootfs /rootfs /rootfs
-
-# Create script to build ext4 image
-RUN echo '#!/bin/sh' > /build.sh && \
+# Create script to build base system
+RUN echo '#!/bin/bash' > /build.sh && \
     echo 'set -ex' >> /build.sh && \
-    echo 'dd if=/dev/zero of=base.ext4 bs=1M count=200' >> /build.sh && \
-    echo 'mkfs.ext4 -F -d /rootfs base.ext4' >> /build.sh && \
+    echo 'dd if=/dev/zero of=base.ext4 bs=1M count=2048' >> /build.sh && \
+    echo 'mkfs.ext4 base.ext4' >> /build.sh && \
+    echo 'mkdir -p /mnt/rootfs' >> /build.sh && \
+    echo 'mount -o loop base.ext4 /mnt/rootfs' >> /build.sh && \
+    echo 'debootstrap --variant=minbase buster /mnt/rootfs http://deb.debian.org/debian' >> /build.sh && \
+    echo 'echo "nameserver 8.8.8.8" > /mnt/rootfs/etc/resolv.conf' >> /build.sh && \
+    echo 'echo "nameserver 8.8.4.4" >> /mnt/rootfs/etc/resolv.conf' >> /build.sh && \
+    echo 'chroot /mnt/rootfs apt-get clean' >> /build.sh && \
+    echo 'chroot /mnt/rootfs rm -rf /var/lib/apt/lists/*' >> /build.sh && \
+    echo 'umount /mnt/rootfs' >> /build.sh && \
     echo 'cp base.ext4 /output/base.ext4' >> /build.sh && \
     chmod +x /build.sh
 

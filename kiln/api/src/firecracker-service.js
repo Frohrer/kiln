@@ -203,30 +203,24 @@ class FirecrackerService {
         const imagePath = path.join(this.imagesDir, `${imageId}.ext4`);
         const baseRootfsPath = path.join(this.rootfsDir, 'base.ext4');
         const mountPoint = `/tmp/mount-${imageId}`;
-        const baseRootfsMount = `/tmp/base-rootfs`;
         
         try {
             // Create a new image with more space (4GB)
             execSync(`dd if=/dev/zero of=${imagePath} bs=1M count=4096`);
             execSync(`mkfs.ext4 ${imagePath}`);
             
-            // Create mount points
+            // Create mount point
             execSync(`mkdir -p ${mountPoint}`);
-            execSync(`mkdir -p ${baseRootfsMount}`);
 
             try {
                 // Mount the new image
                 execSync(`mount -o loop ${imagePath} ${mountPoint}`);
 
                 try {
-                    // Mount base rootfs and copy files
-                    execSync(`mount -o loop ${baseRootfsPath} ${baseRootfsMount}`);
-                    execSync(`cp -a ${baseRootfsMount}/. ${mountPoint}/`);
-                    
-                    // Ensure all processes are done with the mount before unmounting
-                    execSync('sync');
-                    execSync(`fuser -k ${baseRootfsMount} || true`);
-                    execSync(`umount ${baseRootfsMount}`);
+                    // Copy base rootfs content
+                    execSync(`mount -o loop,ro ${baseRootfsPath} /mnt`);
+                    execSync(`cp -a /mnt/. ${mountPoint}/`);
+                    execSync(`umount /mnt`);
 
                     // Create necessary directories
                     execSync(`mkdir -p ${mountPoint}/app`);
@@ -282,12 +276,28 @@ class FirecrackerService {
                         path: imagePath
                     };
                 } finally {
-                    // Clean up base rootfs mount with retries
-                    await this.cleanupMount(baseRootfsMount);
+                    // Ensure all processes are done with the mount
+                    execSync('sync');
+                    
+                    // Try to unmount with increasing force if needed
+                    try {
+                        execSync(`umount ${mountPoint}`);
+                    } catch (error) {
+                        try {
+                            execSync(`fuser -k ${mountPoint}`);
+                            execSync(`umount -f ${mountPoint}`);
+                        } catch (error) {
+                            execSync(`umount -l ${mountPoint}`);
+                        }
+                    }
                 }
             } finally {
-                // Clean up new image mount with retries
-                await this.cleanupMount(mountPoint);
+                // Clean up mount point
+                try {
+                    execSync(`rmdir ${mountPoint}`);
+                } catch (error) {
+                    logger.warn(`Could not remove mount point: ${error.message}`);
+                }
             }
         } catch (error) {
             // Cleanup on failure
@@ -377,7 +387,7 @@ class FirecrackerService {
                 throw new Error(`Failed to create script at ${scriptPath}`);
             }
             
-            // Ensure script has proper permissions both from host and chroot perspective
+            // Ensure script has proper permissions
             execSync(`chmod 755 ${scriptPath}`);
             execSync(`chown root:root ${scriptPath}`);
             
@@ -396,31 +406,22 @@ class FirecrackerService {
             // Also check the script content was written correctly
             logger.debug('Script content verification:', execSync(`cat ${scriptPath}`).toString());
 
-            // Verify the script is visible inside the chroot
             try {
-                execSync(`chroot ${mountPoint} ls -la /setup.sh`);
-                logger.debug('Script is visible inside chroot');
-            } catch (error) {
-                logger.error('Script is not visible inside chroot:', error.message);
-                throw new Error('Script is not accessible inside chroot environment');
-            }
-
-            try {
-                // Execute setup in chroot with error output
-                logger.debug('Executing chroot command...');
-                const result = execSync(`chroot ${mountPoint} /setup.sh 2>&1`, {
+                // Execute setup using systemd-nspawn for better isolation
+                logger.debug('Executing setup in systemd-nspawn...');
+                const result = execSync(`systemd-nspawn --quiet --directory=${mountPoint} /setup.sh`, {
                     maxBuffer: 10 * 1024 * 1024 // 10MB buffer for output
                 });
-                logger.debug('Chroot execution output:', result.toString());
+                logger.debug('Setup execution output:', result.toString());
             } catch (error) {
-                logger.error(`Chroot execution failed: ${error.message}`);
+                logger.error(`Setup execution failed: ${error.message}`);
                 if (error.stdout) logger.error('Stdout:', error.stdout.toString());
                 if (error.stderr) logger.error('Stderr:', error.stderr.toString());
                 
                 // Try to get more information about the failure
                 try {
                     logger.debug('Mount status:', execSync('mount').toString());
-                    logger.debug('Chroot environment:', execSync(`ls -la ${mountPoint}`).toString());
+                    logger.debug('Container environment:', execSync(`ls -la ${mountPoint}`).toString());
                 } catch (debugError) {
                     logger.error('Failed to get debug information:', debugError.message);
                 }
