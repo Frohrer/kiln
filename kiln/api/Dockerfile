@@ -9,8 +9,16 @@ RUN apt-get update && \
     libreadline-dev libblas-dev liblapack-dev libpcre3-dev libarpack2-dev \
     libfftw3-dev libglpk-dev libqhull-dev libqrupdate-dev libsuitesparse-dev \
     libsundials-dev libpcre2-dev libcap-dev curl wget iproute2 jq docker.io e2fsprogs \
-    gosu kmod util-linux iproute2 procps systemd fuse psmisc && \
+    kmod util-linux iproute2 procps systemd fuse psmisc && \
     rm -rf /var/lib/apt/lists/*
+
+# Install gosu properly
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y gosu; \
+    rm -rf /var/lib/apt/lists/*; \
+    # verify that the binary works
+    gosu nobody true
 
 # Install KVM kernel module and required tools
 RUN apt-get update && \
@@ -19,7 +27,7 @@ RUN apt-get update && \
     # Create kvm group if it doesn't exist
     groupadd -f kvm
 
-# Create kiln user and group
+# Create kiln user and group with sudo access for specific commands
 RUN useradd -M kiln && \
     usermod -aG kvm kiln && \
     usermod -aG disk kiln && \
@@ -31,12 +39,14 @@ RUN curl -Lo firecracker https://github.com/firecracker-microvm/firecracker/rele
     chmod +x firecracker && \
     mv firecracker /usr/local/bin/
 
-# Set up Firecracker directories
+# Set up Firecracker directories with proper permissions
 RUN mkdir -p /var/lib/firecracker/{kernels,rootfs,images} && \
     mkdir -p /kiln && \
     mkdir -p /tmp/mount-python-3.12 && \
-    chown -R kiln:kiln /var/lib/firecracker /kiln /tmp/mount-python-3.12 && \
-    chmod -R 755 /var/lib/firecracker /kiln /tmp/mount-python-3.12
+    chown -R root:root /var/lib/firecracker && \
+    chmod -R 755 /var/lib/firecracker && \
+    chown -R kiln:kiln /kiln /tmp/mount-python-3.12 && \
+    chmod -R 755 /kiln /tmp/mount-python-3.12
 
 WORKDIR /kiln_api
 COPY kiln/api/package.json ./
@@ -46,17 +56,23 @@ RUN chmod +x ./src/api-entrypoint.sh && \
     find . -type f -name "*.sh" -exec chmod +x {} \; && \
     chown -R kiln:kiln .
 
-# Create a wrapper script for mount operations
+# Create a wrapper script for privileged operations
 RUN echo '#!/bin/bash\n\
-if [ "$1" = "mount" ]; then\n\
-    shift\n\
-    exec gosu root mount "$@"\n\
-else\n\
-    exec "$@"\n\
-fi' > /usr/local/bin/entrypoint-wrapper.sh && \
-    chmod +x /usr/local/bin/entrypoint-wrapper.sh
+exec gosu root "$@"' > /usr/local/bin/run-as-root.sh && \
+chmod +x /usr/local/bin/run-as-root.sh
+
+# Create the entrypoint wrapper
+RUN echo '#!/bin/bash\n\
+# Give root group write permission to /dev/kvm\n\
+if [ -e /dev/kvm ]; then\n\
+    chmod g+rw /dev/kvm\n\
+fi\n\
+\n\
+# Run the actual entrypoint script as kiln user\n\
+exec gosu kiln /bin/bash ./src/api-entrypoint.sh' > /usr/local/bin/entrypoint-wrapper.sh && \
+chmod +x /usr/local/bin/entrypoint-wrapper.sh
 
 # Run as root initially, the entrypoint script will drop privileges
-ENTRYPOINT ["/usr/local/bin/entrypoint-wrapper.sh", "/bin/bash", "./src/api-entrypoint.sh"]
+ENTRYPOINT ["/bin/bash", "/usr/local/bin/entrypoint-wrapper.sh"]
 EXPOSE 2000
 EXPOSE 2020

@@ -155,37 +155,37 @@ class FirecrackerService {
         
         try {
             // Create a new image with more space (4GB)
-            execSync(`dd if=/dev/zero of=${imagePath} bs=1M count=4096`);
-            execSync(`mkfs.ext4 ${imagePath}`);
+            execSync(`/usr/local/bin/run-as-root.sh dd if=/dev/zero of=${imagePath} bs=1M count=4096`);
+            execSync(`/usr/local/bin/run-as-root.sh mkfs.ext4 ${imagePath}`);
             
             // Create mount points
-            fs.mkdirSync(mountPoint, { recursive: true });
-            fs.mkdirSync(baseRootfsMount, { recursive: true });
+            execSync(`/usr/local/bin/run-as-root.sh mkdir -p ${mountPoint}`);
+            execSync(`/usr/local/bin/run-as-root.sh mkdir -p ${baseRootfsMount}`);
 
             try {
-                // Mount the new image with elevated privileges
-                execSync(`gosu root mount -o loop ${imagePath} ${mountPoint}`);
+                // Mount the new image
+                execSync(`/usr/local/bin/run-as-root.sh mount -o loop ${imagePath} ${mountPoint}`);
 
                 try {
-                    // Mount base rootfs and copy files with elevated privileges
-                    execSync(`gosu root mount -o loop ${baseRootfsPath} ${baseRootfsMount}`);
-                    execSync(`gosu root cp -a ${baseRootfsMount}/. ${mountPoint}/`);
+                    // Mount base rootfs and copy files
+                    execSync(`/usr/local/bin/run-as-root.sh mount -o loop ${baseRootfsPath} ${baseRootfsMount}`);
+                    execSync(`/usr/local/bin/run-as-root.sh cp -a ${baseRootfsMount}/. ${mountPoint}/`);
                     
                     // Ensure all processes are done with the mount before unmounting
                     execSync('sync');
-                    execSync(`gosu root fuser -k ${baseRootfsMount} || true`);
-                    execSync(`gosu root umount ${baseRootfsMount}`);
+                    execSync(`/usr/local/bin/run-as-root.sh fuser -k ${baseRootfsMount} || true`);
+                    execSync(`/usr/local/bin/run-as-root.sh umount ${baseRootfsMount}`);
 
                     // Create necessary directories
-                    execSync(`gosu root mkdir -p ${mountPoint}/app`);
-                    execSync(`gosu root mkdir -p ${mountPoint}/var/cache/apt/archives`);
-                    execSync(`gosu root mkdir -p ${mountPoint}/var/lib/apt/lists`);
+                    execSync(`/usr/local/bin/run-as-root.sh mkdir -p ${mountPoint}/app`);
+                    execSync(`/usr/local/bin/run-as-root.sh mkdir -p ${mountPoint}/var/cache/apt/archives`);
+                    execSync(`/usr/local/bin/run-as-root.sh mkdir -p ${mountPoint}/var/lib/apt/lists`);
 
                     // Copy files to the image
                     for (const file of files) {
                         const filePath = path.join(mountPoint, 'app', file.name);
                         fs.writeFileSync(filePath, file.content);
-                        execSync(`gosu root chmod 755 ${filePath}`);
+                        execSync(`/usr/local/bin/run-as-root.sh chmod 755 ${filePath}`);
                     }
 
                     // Setup language-specific environment
@@ -219,7 +219,7 @@ class FirecrackerService {
                     // Write manifest file
                     const manifestPath = path.join(mountPoint, '.ppman-installed');
                     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
-                    execSync(`gosu root chmod 644 ${manifestPath}`);
+                    execSync(`/usr/local/bin/run-as-root.sh chmod 644 ${manifestPath}`);
 
                     // Register the runtime
                     runtime.load_package(imagePath);
@@ -240,7 +240,7 @@ class FirecrackerService {
         } catch (error) {
             // Cleanup on failure
             if (fs.existsSync(imagePath)) {
-                fs.unlinkSync(imagePath);
+                execSync(`/usr/local/bin/run-as-root.sh rm -f ${imagePath}`);
             }
             logger.error(`Failed to build image: ${error}`);
             throw error;
@@ -258,7 +258,7 @@ class FirecrackerService {
                 if (!mountInfo.includes(mountPath)) {
                     logger.debug(`${mountPath} is not mounted`);
                     try {
-                        execSync(`gosu root rmdir ${mountPath}`);
+                        execSync(`/usr/local/bin/run-as-root.sh rmdir ${mountPath}`);
                     } catch (error) {
                         logger.warn(`Could not remove directory ${mountPath}: ${error.message}`);
                     }
@@ -268,31 +268,31 @@ class FirecrackerService {
                 // Ensure all processes are done with the mount
                 execSync('sync');
                 
-                // Try to kill any processes using the mount with elevated privileges
+                // Try to kill any processes using the mount
                 try {
-                    execSync(`gosu root fuser -k ${mountPath} 2>/dev/null || true`);
+                    execSync(`/usr/local/bin/run-as-root.sh fuser -k ${mountPath} 2>/dev/null || true`);
                     // Wait a bit for processes to die
                     await new Promise(resolve => setTimeout(resolve, 1000));
                 } catch (error) {
                     logger.debug(`No processes using ${mountPath}`);
                 }
                 
-                // Try unmounting with increasing force using elevated privileges
+                // Try unmounting with increasing force
                 try {
-                    execSync(`gosu root umount ${mountPath}`);
+                    execSync(`/usr/local/bin/run-as-root.sh umount ${mountPath}`);
                 } catch (error) {
                     try {
-                        execSync(`gosu root umount -f ${mountPath}`);
+                        execSync(`/usr/local/bin/run-as-root.sh umount -f ${mountPath}`);
                     } catch (error) {
-                        execSync(`gosu root umount -l ${mountPath}`);
+                        execSync(`/usr/local/bin/run-as-root.sh umount -l ${mountPath}`);
                     }
                 }
                 
                 // Wait before trying to remove the directory
                 await new Promise(resolve => setTimeout(resolve, 1000));
                 
-                // Try to remove the mount point with elevated privileges
-                execSync(`gosu root rmdir ${mountPath}`);
+                // Try to remove the mount point
+                execSync(`/usr/local/bin/run-as-root.sh rmdir ${mountPath}`);
                 logger.debug(`Successfully cleaned up mount point ${mountPath}`);
                 return;
             } catch (error) {
