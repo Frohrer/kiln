@@ -100,4 +100,4 @@ verify_files
 # Start the API server
 echo "Starting API server..."
 cd /kiln_api
-exec node src/api.js
+exec node src/index.js
