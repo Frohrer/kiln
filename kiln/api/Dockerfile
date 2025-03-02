@@ -33,9 +33,12 @@ RUN curl -Lo firecracker https://github.com/firecracker-microvm/firecracker/rele
 # Build custom kernel and create rootfs
 RUN set -e && \
     ARCH="$(uname -m)" && \
-    # Create necessary directories
-    mkdir -p /var/lib/firecracker/{kernels,rootfs,images} && \
+    # Create necessary directories and verify they exist
+    mkdir -p /var/lib/firecracker/kernels && \
+    mkdir -p /var/lib/firecracker/rootfs && \
+    mkdir -p /var/lib/firecracker/images && \
     mkdir -p /kiln && \
+    ls -la /var/lib/firecracker/ && \
     # Clone and build Linux kernel
     cd /tmp && \
     git clone --depth 1 --branch v5.10 https://github.com/torvalds/linux.git linux.git && \
@@ -77,7 +80,9 @@ RUN set -e && \
     echo 'CONFIG_SMP=n' >> .config && \
     make olddefconfig && \
     make -j$(nproc) vmlinux && \
-    cp vmlinux /var/lib/firecracker/kernels/ && \
+    ls -la vmlinux && \
+    cp vmlinux /var/lib/firecracker/kernels/vmlinux && \
+    ls -la /var/lib/firecracker/kernels/ && \
     cd / && rm -rf /tmp/linux.git && \
     # Create rootfs
     dd if=/dev/zero of=/var/lib/firecracker/rootfs/base.ext4 bs=1M count=200 && \
