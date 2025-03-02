@@ -8,7 +8,7 @@ RUN apt-get update && \
     libncurses6 libncurses5 libedit-dev libseccomp-dev rename procps python3 \
     libreadline-dev libblas-dev liblapack-dev libpcre3-dev libarpack2-dev \
     libfftw3-dev libglpk-dev libqhull-dev libqrupdate-dev libsuitesparse-dev \
-    libsundials-dev libpcre2-dev libcap-dev curl wget iproute2 && \
+    libsundials-dev libpcre2-dev libcap-dev curl wget iproute2 jq && \
     rm -rf /var/lib/apt/lists/*
 
 # Install KVM kernel module and required tools
@@ -38,14 +38,14 @@ RUN set -e && \
     # Set initial permissions
     chown -R kiln:kiln /var/lib/firecracker /kiln && \
     chmod -R 755 /var/lib/firecracker /kiln && \
-    # Download kernel
-    wget --progress=dot:giga -O /var/lib/firecracker/kernels/vmlinux.bin \
-    "https://s3.amazonaws.com/spec.ccfc.min/img/quickstart_guide/${ARCH}/kernels/vmlinux.bin" && \
+    # Download latest kernel
+    wget --progress=dot:giga -O /var/lib/firecracker/kernels/vmlinux \
+    "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.7/${ARCH}/vmlinux-5.10.204" && \
     # Download rootfs
     wget --progress=dot:giga -O /var/lib/firecracker/rootfs/base.ext4 \
-    "https://s3.amazonaws.com/spec.ccfc.min/img/quickstart_guide/${ARCH}/rootfs/bionic.rootfs.ext4" && \
+    "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.7/${ARCH}/ubuntu-22.04.ext4" && \
     # Verify files exist and have size
-    [ -s /var/lib/firecracker/kernels/vmlinux.bin ] && \
+    [ -s /var/lib/firecracker/kernels/vmlinux ] && \
     [ -s /var/lib/firecracker/rootfs/base.ext4 ] && \
     # Set final permissions
     chown -R kiln:kiln /var/lib/firecracker
