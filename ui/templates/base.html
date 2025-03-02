@@ -32,6 +32,18 @@
                             Code Editor
                         </a>
                     </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'images_page' %}active{% endif %}" href="{{ url_for('images_page') }}">
+                            <i class="fas fa-image me-1"></i>
+                            VM Images
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'processes' %}active{% endif %}" href="{{ url_for('processes') }}">
+                            <i class="fas fa-cogs me-1"></i>
+                            Processes
+                        </a>
+                    </li>
                 </ul>
             </div>
         </div>

@@ -1,7 +1,7 @@
 import logging
 import os
 from datetime import datetime
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, flash, redirect, url_for
 import requests
 
 # Configure logging with more detail
@@ -263,6 +263,60 @@ def format_bytes(bytes):
         value /= 1024
         i += 1
     return f"{value:.2f} {units[i]}"
+
+def list_images():
+    try:
+        response = requests.get(f"{API_BASE}/images")
+        response.raise_for_status()
+        return response.json()['images']
+    except Exception as e:
+        flash(f"Failed to list images: {str(e)}", "error")
+        return []
+
+def create_image(language, version, files=None):
+    try:
+        data = {
+            "language": language,
+            "version": version,
+            "files": files or []
+        }
+        response = requests.post(f"{API_BASE}/images", json=data)
+        response.raise_for_status()
+        flash(f"Successfully created image {language}-{version}", "success")
+        return response.json()
+    except Exception as e:
+        flash(f"Failed to create image: {str(e)}", "error")
+        return None
+
+def delete_image(image_id):
+    try:
+        response = requests.delete(f"{API_BASE}/images/{image_id}")
+        response.raise_for_status()
+        flash(f"Successfully deleted image {image_id}", "success")
+        return True
+    except Exception as e:
+        flash(f"Failed to delete image: {str(e)}", "error")
+        return False
+
+@app.route("/images")
+def images_page():
+    images = list_images()
+    return render_template("images.html", images=images)
+
+@app.route("/images/create", methods=["GET", "POST"])
+def create_image_page():
+    if request.method == "POST":
+        language = request.form.get("language")
+        version = request.form.get("version")
+        if language and version:
+            create_image(language, version)
+            return redirect(url_for("images_page"))
+    return render_template("create_image.html")
+
+@app.route("/images/delete/<image_id>", methods=["POST"])
+def delete_image_route(image_id):
+    delete_image(image_id)
+    return redirect(url_for("images_page"))
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=5000, debug=True)
