@@ -273,10 +273,40 @@ class FirecrackerService {
                 fs.unlinkSync(socketPath);
             }
 
+            // Verify Firecracker binary exists and is executable
+            if (!fs.existsSync(this.firecrackerPath)) {
+                throw new Error(`Firecracker binary not found at ${this.firecrackerPath}`);
+            }
+
+            try {
+                fs.accessSync(this.firecrackerPath, fs.constants.X_OK);
+            } catch (error) {
+                throw new Error(`Firecracker binary at ${this.firecrackerPath} is not executable: ${error}`);
+            }
+
+            // Log binary details
+            try {
+                const stats = fs.statSync(this.firecrackerPath);
+                logger.debug(`Firecracker binary details: size=${stats.size}, mode=${stats.mode.toString(8)}, uid=${stats.uid}, gid=${stats.gid}`);
+                
+                // Try to read first few bytes to verify it's a valid binary
+                const fd = fs.openSync(this.firecrackerPath, 'r');
+                const buffer = Buffer.alloc(4);
+                fs.readSync(fd, buffer, 0, 4, 0);
+                fs.closeSync(fd);
+                
+                if (buffer[0] !== 0x7f || buffer[1] !== 0x45 || buffer[2] !== 0x4c || buffer[3] !== 0x46) {
+                    throw new Error('Firecracker binary is not a valid ELF file');
+                }
+            } catch (error) {
+                logger.error(`Error checking Firecracker binary: ${error}`);
+            }
+
             // Start Firecracker process with full path
             logger.debug(`Starting Firecracker from ${this.firecrackerPath}`);
             const firecracker = spawn(this.firecrackerPath, ['--api-sock', socketPath], {
-                stdio: ['ignore', 'pipe', 'pipe']
+                stdio: ['ignore', 'pipe', 'pipe'],
+                env: process.env
             });
 
             // Collect stdout and stderr
