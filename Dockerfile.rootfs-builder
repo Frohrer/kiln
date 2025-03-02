@@ -1,31 +1,38 @@
+FROM alpine:latest as rootfs-prep
+
+# Install required packages for the rootfs
+RUN apk add --no-cache openrc util-linux
+
+# Set up the basic system configuration
+RUN ln -s agetty /etc/init.d/agetty.ttyS0 && \
+    echo ttyS0 > /etc/securetty && \
+    rc-update add agetty.ttyS0 default && \
+    rc-update add devfs boot && \
+    rc-update add procfs boot && \
+    rc-update add sysfs boot
+
+# Create a clean rootfs directory
+RUN mkdir -p /rootfs && \
+    for d in bin etc lib root sbin usr; do \
+        cp -a /$d /rootfs/; \
+    done && \
+    for dir in dev proc run sys var; do \
+        mkdir -p /rootfs/${dir}; \
+    done
+
 FROM alpine:latest
 
-# Install required packages
-RUN apk add --no-cache e2fsprogs util-linux
+# Install required packages for creating ext4 image
+RUN apk add --no-cache e2fsprogs
 
 WORKDIR /build
 
-# Create the rootfs contents directly without mounting
-RUN set -ex && \
-    # Create directory structure
-    mkdir -p rootfs && \
-    cd rootfs && \
-    # Create base directory structure
-    mkdir -p bin etc lib root sbin usr dev proc run sys var && \
-    # Install base system
-    cd .. && \
-    # Create the ext4 file
-    dd if=/dev/zero of=base.ext4 bs=1M count=200 && \
-    mkfs.ext4 -d rootfs base.ext4
+# Copy the prepared rootfs from the first stage
+COPY --from=rootfs-prep /rootfs /build/rootfs
 
-# Create a script to handle the final copy
-COPY <<EOF /build/copy-rootfs.sh
-#!/bin/sh
-set -e
-cp base.ext4 /output/base.ext4
-EOF
-
-RUN chmod +x /build/copy-rootfs.sh
+# Create the ext4 image
+RUN dd if=/dev/zero of=base.ext4 bs=1M count=200 && \
+    mkfs.ext4 -F -d rootfs base.ext4
 
 VOLUME /output
-CMD ["/build/copy-rootfs.sh"] 
+CMD cp base.ext4 /output/base.ext4 
