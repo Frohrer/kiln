@@ -22,6 +22,7 @@ RUN apt-get update && \
 # Create kiln user and group
 RUN useradd -M kiln && \
     usermod -aG kvm kiln && \
+    usermod -aG disk kiln && \
     # Verify group membership
     groups kiln | grep kvm
 
@@ -33,8 +34,9 @@ RUN curl -Lo firecracker https://github.com/firecracker-microvm/firecracker/rele
 # Set up Firecracker directories
 RUN mkdir -p /var/lib/firecracker/{kernels,rootfs,images} && \
     mkdir -p /kiln && \
-    chown -R kiln:kiln /var/lib/firecracker /kiln && \
-    chmod -R 755 /var/lib/firecracker /kiln
+    mkdir -p /tmp/mount-python-3.12 && \
+    chown -R kiln:kiln /var/lib/firecracker /kiln /tmp/mount-python-3.12 && \
+    chmod -R 755 /var/lib/firecracker /kiln /tmp/mount-python-3.12
 
 WORKDIR /kiln_api
 COPY kiln/api/package.json ./
@@ -44,7 +46,17 @@ RUN chmod +x ./src/api-entrypoint.sh && \
     find . -type f -name "*.sh" -exec chmod +x {} \; && \
     chown -R kiln:kiln .
 
+# Create a wrapper script for mount operations
+RUN echo '#!/bin/bash\n\
+if [ "$1" = "mount" ]; then\n\
+    shift\n\
+    exec gosu root mount "$@"\n\
+else\n\
+    exec "$@"\n\
+fi' > /usr/local/bin/entrypoint-wrapper.sh && \
+    chmod +x /usr/local/bin/entrypoint-wrapper.sh
+
 # Run as root initially, the entrypoint script will drop privileges
-ENTRYPOINT ["/bin/bash", "./src/api-entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/entrypoint-wrapper.sh", "/bin/bash", "./src/api-entrypoint.sh"]
 EXPOSE 2000
 EXPOSE 2020
