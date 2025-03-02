@@ -385,7 +385,7 @@ class FirecrackerService {
                 machine_config: {
                     vcpu_count: config.cpu_count || 1,
                     mem_size_mib: config.memory_limit || 1024,
-                    ht_enabled: false
+                    smt: false  // Replaces ht_enabled
                 },
                 network_interfaces: [{
                     iface_id: 'eth0',
