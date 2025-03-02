@@ -16,10 +16,16 @@ services:
       dockerfile: Dockerfile
     volumes:
       - kernel-data:/var/lib/firecracker/kernels
+      - rootfs-data:/var/lib/firecracker/rootfs
     ports:
       - "2000:2000"
       - "2020:2020"
     privileged: true  # Required for KVM and mounting operations
+    cap_add:
+      - SYS_ADMIN  # Required for mount operations
+    security_opt:
+      - apparmor:unconfined  # Required for nested containerization
 
 volumes:
-  kernel-data: 
+  kernel-data:
+  rootfs-data: 

@@ -30,12 +30,16 @@ RUN curl -Lo firecracker https://github.com/firecracker-microvm/firecracker/rele
     mv firecracker /usr/local/bin/
 
 # Set up Firecracker directories and create rootfs
-RUN set -e && \
+RUN set -ex && \
     # Create necessary directories
-    mkdir -p /var/lib/firecracker/{kernels,rootfs,images} && \
+    mkdir -p /var/lib/firecracker/kernels && \
+    mkdir -p /var/lib/firecracker/rootfs && \
+    mkdir -p /var/lib/firecracker/images && \
     mkdir -p /kiln && \
+    ls -la /var/lib/firecracker/ && \
     # Create rootfs
     dd if=/dev/zero of=/var/lib/firecracker/rootfs/base.ext4 bs=1M count=200 && \
+    ls -la /var/lib/firecracker/rootfs/ && \
     mkfs.ext4 /var/lib/firecracker/rootfs/base.ext4 && \
     mkdir -p /tmp/my-rootfs && \
     mount /var/lib/firecracker/rootfs/base.ext4 /tmp/my-rootfs && \
