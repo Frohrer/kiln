@@ -15,6 +15,7 @@ class FirecrackerService {
         this.imagesDir = '/var/lib/firecracker/images';
         this.kernelsDir = '/var/lib/firecracker/kernels';
         this.rootfsDir = '/var/lib/firecracker/rootfs';
+        this.firecrackerPath = process.env.FIRECRACKER_PATH || '/usr/local/bin/firecracker';
         
         // Ensure directories exist
         [this.imagesDir, this.kernelsDir, this.rootfsDir].forEach(dir => {
@@ -32,6 +33,16 @@ class FirecrackerService {
         }
         if (!fs.existsSync(baseRootfsPath)) {
             throw new Error('Base rootfs not found');
+        }
+
+        // Verify Firecracker binary exists and is executable
+        if (!fs.existsSync(this.firecrackerPath)) {
+            throw new Error(`Firecracker binary not found at ${this.firecrackerPath}`);
+        }
+        try {
+            fs.accessSync(this.firecrackerPath, fs.constants.X_OK);
+        } catch (error) {
+            throw new Error(`Firecracker binary at ${this.firecrackerPath} is not executable`);
         }
 
         // Register existing VM images
@@ -262,24 +273,49 @@ class FirecrackerService {
                 fs.unlinkSync(socketPath);
             }
 
-            // Start Firecracker process
-            const firecracker = spawn('firecracker', ['--api-sock', socketPath]);
+            // Start Firecracker process with full path
+            logger.debug(`Starting Firecracker from ${this.firecrackerPath}`);
+            const firecracker = spawn(this.firecrackerPath, ['--api-sock', socketPath], {
+                stdio: ['ignore', 'pipe', 'pipe']
+            });
+
+            // Collect stdout and stderr
+            let stdout = '';
+            let stderr = '';
+            firecracker.stdout.on('data', (data) => {
+                stdout += data;
+                logger.debug(`Firecracker stdout: ${data}`);
+            });
+            firecracker.stderr.on('data', (data) => {
+                stderr += data;
+                logger.error(`Firecracker stderr: ${data}`);
+            });
             
             // Wait for the socket file to be created and available
             await new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => {
+                    reject(new Error('Timeout waiting for Firecracker socket'));
+                }, 5000);
+
                 const checkSocket = () => {
                     if (fs.existsSync(socketPath)) {
+                        clearTimeout(timeout);
                         resolve();
                     } else {
+                        // Check if process has exited
+                        if (firecracker.exitCode !== null) {
+                            clearTimeout(timeout);
+                            reject(new Error(`Firecracker process exited with code ${firecracker.exitCode}. Stdout: ${stdout}, Stderr: ${stderr}`));
+                        }
                         setTimeout(checkSocket, 100);
                     }
                 };
                 checkSocket();
                 
                 // Add error handler for the Firecracker process
-                firecracker.on('error', reject);
-                firecracker.stderr.on('data', (data) => {
-                    logger.error(`Firecracker stderr: ${data}`);
+                firecracker.on('error', (error) => {
+                    clearTimeout(timeout);
+                    reject(new Error(`Failed to start Firecracker: ${error.message}`));
                 });
             });
 
