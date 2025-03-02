@@ -9,16 +9,8 @@ RUN apt-get update && \
     libreadline-dev libblas-dev liblapack-dev libpcre3-dev libarpack2-dev \
     libfftw3-dev libglpk-dev libqhull-dev libqrupdate-dev libsuitesparse-dev \
     libsundials-dev libpcre2-dev libcap-dev curl wget iproute2 jq docker.io e2fsprogs \
-    kmod util-linux iproute2 procps systemd fuse psmisc && \
+    kmod util-linux iproute2 procps systemd fuse psmisc sudo && \
     rm -rf /var/lib/apt/lists/*
-
-# Install gosu properly
-RUN set -eux; \
-    apt-get update; \
-    apt-get install -y gosu; \
-    rm -rf /var/lib/apt/lists/*; \
-    # verify that the binary works
-    gosu nobody true
 
 # Install KVM kernel module and required tools
 RUN apt-get update && \
@@ -28,9 +20,11 @@ RUN apt-get update && \
     groupadd -f kvm
 
 # Create kiln user and group with proper permissions
-RUN useradd -M kiln && \
+RUN useradd -m kiln && \
     usermod -aG kvm kiln && \
     usermod -aG disk kiln && \
+    # Allow kiln user to use sudo for specific commands without password
+    echo "kiln ALL=(ALL) NOPASSWD: /bin/mount, /bin/umount, /bin/dd, /bin/mkdir, /bin/rmdir, /bin/chown, /bin/chmod, /bin/cp, /bin/rm, /usr/bin/mkfs.ext4, /usr/bin/fuser" >> /etc/sudoers && \
     # Create /dev/kvm if it doesn't exist (for Docker environments)
     mkdir -p /dev && \
     mknod /dev/kvm c 10 232 || true && \
@@ -63,7 +57,7 @@ RUN chmod +x ./src/api-entrypoint.sh && \
 
 # Create a wrapper script for privileged operations
 RUN echo '#!/bin/bash\n\
-exec gosu root "$@"' > /usr/local/bin/run-as-root.sh && \
+exec sudo "$@"' > /usr/local/bin/run-as-root.sh && \
 chmod +x /usr/local/bin/run-as-root.sh
 
 # Create the entrypoint wrapper
@@ -81,7 +75,7 @@ chown -R kiln:kiln /var/lib/firecracker\n\
 chmod -R 775 /var/lib/firecracker\n\
 \n\
 # Run the actual entrypoint script as kiln user\n\
-exec gosu kiln /bin/bash ./src/api-entrypoint.sh' > /usr/local/bin/entrypoint-wrapper.sh && \
+exec su -s /bin/bash kiln -c "./src/api-entrypoint.sh"' > /usr/local/bin/entrypoint-wrapper.sh && \
 chmod +x /usr/local/bin/entrypoint-wrapper.sh
 
 # Run as root initially, the entrypoint script will drop privileges
