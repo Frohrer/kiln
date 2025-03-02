@@ -1,5 +1,17 @@
 #!/bin/bash
 
+# Install required system utilities
+echo "Installing required system utilities..."
+apt-get update
+apt-get install -y \
+    kmod \
+    util-linux \
+    iproute2 \
+    procps \
+    systemd \
+    fuse \
+    psmisc
+
 # Function to download Firecracker
 download_firecracker() {
     local version="v1.5.0"

@@ -55,24 +55,45 @@ class FirecrackerService {
     verifyKVM() {
         try {
             // Check if running in a VM
-            const isVM = execSync('systemd-detect-virt || true').toString().trim();
-            const isInVM = isVM !== 'none' && isVM !== '';
+            let isInVM = false;
+            try {
+                const isVM = execSync('which systemd-detect-virt && systemd-detect-virt || true').toString().trim();
+                isInVM = isVM !== 'none' && isVM !== '';
+            } catch (error) {
+                logger.warn('systemd-detect-virt not available, skipping VM detection');
+            }
             
             // Check if KVM module is loaded
-            const lsmod = execSync('lsmod | grep kvm').toString();
-            if (!lsmod.includes('kvm')) {
-                if (isInVM) {
-                    throw new Error('KVM module is not loaded. Since you are running in a VM, please ensure nested virtualization is enabled in your hypervisor settings.');
-                } else {
-                    throw new Error('KVM module is not loaded. Please ensure KVM is enabled in BIOS/UEFI and the kvm module is loaded.');
+            try {
+                const lsmodExists = execSync('which lsmod || true').toString().trim();
+                if (!lsmodExists) {
+                    throw new Error('lsmod command not found. Please ensure kmod package is installed.');
                 }
+                
+                const lsmod = execSync('lsmod | grep kvm || true').toString();
+                if (!lsmod.includes('kvm')) {
+                    if (isInVM) {
+                        throw new Error('KVM module is not loaded. Since you are running in a VM, please ensure nested virtualization is enabled in your hypervisor settings.');
+                    } else {
+                        throw new Error('KVM module is not loaded. Please ensure KVM is enabled in BIOS/UEFI and the kvm module is loaded.');
+                    }
+                }
+            } catch (error) {
+                if (error.message.includes('not found')) {
+                    throw error;
+                }
+                logger.error('Error checking KVM module:', error);
+                throw new Error('Failed to check KVM module status. Please ensure KVM is properly installed.');
             }
 
             // Check for nested virtualization if in a VM
             if (isInVM) {
                 try {
-                    const nestedEnabled = fs.readFileSync('/sys/module/kvm_intel/parameters/nested', 'utf8').trim() === 'Y' ||
-                                        fs.readFileSync('/sys/module/kvm_amd/parameters/nested', 'utf8').trim() === '1';
+                    const nestedEnabled = fs.existsSync('/sys/module/kvm_intel/parameters/nested') ?
+                        fs.readFileSync('/sys/module/kvm_intel/parameters/nested', 'utf8').trim() === 'Y' :
+                        fs.existsSync('/sys/module/kvm_amd/parameters/nested') &&
+                        fs.readFileSync('/sys/module/kvm_amd/parameters/nested', 'utf8').trim() === '1';
+                    
                     if (!nestedEnabled) {
                         throw new Error('Nested virtualization is not enabled. Please enable it in your hypervisor settings.');
                     }
@@ -101,9 +122,7 @@ class FirecrackerService {
 
             logger.debug(`KVM verification passed successfully${isInVM ? ' (running in VM with nested virtualization)' : ''}`);
         } catch (error) {
-            if (error.message.includes('Command failed')) {
-                throw new Error('Failed to check KVM status. Please ensure KVM and required utilities are installed.');
-            }
+            logger.error('KVM verification failed:', error);
             throw error;
         }
     }
