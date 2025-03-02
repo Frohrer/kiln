@@ -23,7 +23,8 @@ RUN apt-get update && \
 RUN useradd -m kiln && \
     usermod -aG kvm kiln && \
     usermod -aG disk kiln && \
-    # Allow kiln user to use sudo for specific commands without password
+    # Allow kiln user to use sudo for specific commands without password and without TTY
+    echo "Defaults:kiln !requiretty" >> /etc/sudoers && \
     echo "kiln ALL=(ALL) NOPASSWD: /bin/mount, /bin/umount, /bin/dd, /bin/mkdir, /bin/rmdir, /bin/chown, /bin/chmod, /bin/cp, /bin/rm, /usr/bin/mkfs.ext4, /usr/bin/fuser" >> /etc/sudoers && \
     # Create /dev/kvm if it doesn't exist (for Docker environments)
     mkdir -p /dev && \
@@ -57,7 +58,7 @@ RUN chmod +x ./src/api-entrypoint.sh && \
 
 # Create a wrapper script for privileged operations
 RUN echo '#!/bin/bash\n\
-exec sudo "$@"' > /usr/local/bin/run-as-root.sh && \
+exec sudo -n "$@"' > /usr/local/bin/run-as-root.sh && \
 chmod +x /usr/local/bin/run-as-root.sh
 
 # Create the entrypoint wrapper
