@@ -12,21 +12,6 @@ services:
             context: ./kiln/api
             dockerfile: Dockerfile.rootfs-builder
         privileged: true
-        cap_add:
-            - SYS_ADMIN
-            - MKNOD
-        security_opt:
-            - apparmor:unconfined
-        devices:
-            - /dev/loop-control:/dev/loop-control
-            - /dev/loop0:/dev/loop0
-            - /dev/loop1:/dev/loop1
-            - /dev/loop2:/dev/loop2
-            - /dev/loop3:/dev/loop3
-            - /dev/loop4:/dev/loop4
-            - /dev/loop5:/dev/loop5
-            - /dev/loop6:/dev/loop6
-            - /dev/loop7:/dev/loop7
         volumes:
             - rootfs-data:/output
 

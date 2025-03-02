@@ -1,0 +1,31 @@
+FROM alpine:latest
+
+# Install required packages
+RUN apk add --no-cache e2fsprogs util-linux
+
+WORKDIR /build
+
+# Create the rootfs contents directly without mounting
+RUN set -ex && \
+    # Create directory structure
+    mkdir -p rootfs && \
+    cd rootfs && \
+    # Create base directory structure
+    mkdir -p bin etc lib root sbin usr dev proc run sys var && \
+    # Install base system
+    cd .. && \
+    # Create the ext4 file
+    dd if=/dev/zero of=base.ext4 bs=1M count=200 && \
+    mkfs.ext4 -d rootfs base.ext4
+
+# Create a script to handle the final copy
+COPY <<EOF /build/copy-rootfs.sh
+#!/bin/sh
+set -e
+cp base.ext4 /output/base.ext4
+EOF
+
+RUN chmod +x /build/copy-rootfs.sh
+
+VOLUME /output
+CMD ["/build/copy-rootfs.sh"] 
