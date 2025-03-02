@@ -8,21 +8,26 @@ download_firecracker() {
     
     echo "Downloading Firecracker ${version}..."
     
-    # Download both binary and SHA256 checksum
-    curl -L -o /usr/local/bin/firecracker "${base_url}/${version}/firecracker-${version}-${arch}"
-    curl -L -o /tmp/firecracker.sha256 "${base_url}/${version}/firecracker-${version}-${arch}.sha256"
+    # Download binary
+    curl -L -o /usr/local/bin/firecracker "${base_url}/${version}/firecracker-${version}-${arch}.tgz"
     
-    # Verify checksum
-    pushd /usr/local/bin > /dev/null
-    if ! sha256sum -c /tmp/firecracker.sha256; then
-        echo "Checksum verification failed!"
+    # Extract the binary
+    cd /usr/local/bin
+    tar xvf firecracker
+    rm firecracker # Remove the tar file
+    mv release-${version}-${arch}/firecracker-${version}-${arch} firecracker
+    rm -rf release-${version}-${arch}
+    
+    # Make it executable
+    chmod +x firecracker
+    
+    # Test the binary
+    if ! ./firecracker --version &> /dev/null; then
+        echo "Binary verification failed!"
         rm -f firecracker
         return 1
     fi
-    popd > /dev/null
     
-    # Clean up
-    rm -f /tmp/firecracker.sha256
     return 0
 }
 
