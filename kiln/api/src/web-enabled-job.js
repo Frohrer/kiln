@@ -131,27 +131,31 @@ class WebEnabledJob extends Job {
         });
     }
 
+    async prime() {
+        // Start VM using the runtime's VM image
+        const vmConfig = {
+            cpu_count: 1,
+            memory_limit: Math.floor(this.memory_limits.run / (1024 * 1024)) // Convert bytes to MB
+        };
+
+        // Get the image path from the runtime
+        const imageId = `${this.runtime.language}-${this.runtime.version.raw}`;
+        
+        // Start the VM
+        const { vmId } = await firecrackerService.startVM(imageId, vmConfig);
+        this.vmId = vmId;
+
+        // Copy files to VM
+        for (const file of this.files) {
+            const command = `cat > /app/${file.name} << 'EOF'\n${file.content}\nEOF`;
+            await firecrackerService.executeInVM(vmId, command);
+        }
+
+        return this;
+    }
+
     async execute(event_bus = null) {
         try {
-            // Start VM using the runtime's VM image
-            const vmConfig = {
-                cpu_count: 1,
-                memory_limit: Math.floor(this.memory_limits.run / (1024 * 1024)) // Convert bytes to MB
-            };
-
-            // Get the image path from the runtime
-            const imageId = `${this.runtime.language}-${this.runtime.version.raw}`;
-            
-            // Start the VM
-            const { vmId } = await firecrackerService.startVM(imageId, vmConfig);
-            this.vmId = vmId;
-
-            // Copy files to VM
-            for (const file of this.files) {
-                const command = `cat > /app/${file.name} << 'EOF'\n${file.content}\nEOF`;
-                await firecrackerService.executeInVM(vmId, command);
-            }
-
             // Execute the code
             const mainFile = this.files[0]?.name;
             if (!mainFile) {
@@ -159,7 +163,7 @@ class WebEnabledJob extends Job {
             }
 
             const command = `cd /app && python ${mainFile}`;
-            const result = await firecrackerService.executeInVM(vmId, command);
+            const result = await firecrackerService.executeInVM(this.vmId, command);
             
             return {
                 success: true,

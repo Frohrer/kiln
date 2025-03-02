@@ -266,7 +266,7 @@ def format_bytes(bytes):
 
 def list_images():
     try:
-        response = requests.get(f"{API_BASE}/images")
+        response = requests.get(f"{API_BASE}/images", headers=API_HEADERS, timeout=30)
         response.raise_for_status()
         return response.json()['images']
     except Exception as e:
@@ -280,7 +280,7 @@ def create_image(language, version, files=None):
             "version": version,
             "files": files or []
         }
-        response = requests.post(f"{API_BASE}/images", json=data)
+        response = requests.post(f"{API_BASE}/images", headers=API_HEADERS, json=data, timeout=60)
         response.raise_for_status()
         flash(f"Successfully created image {language}-{version}", "success")
         return response.json()
@@ -290,7 +290,7 @@ def create_image(language, version, files=None):
 
 def delete_image(image_id):
     try:
-        response = requests.delete(f"{API_BASE}/images/{image_id}")
+        response = requests.delete(f"{API_BASE}/images/{image_id}", headers=API_HEADERS, timeout=30)
         response.raise_for_status()
         flash(f"Successfully deleted image {image_id}", "success")
         return True

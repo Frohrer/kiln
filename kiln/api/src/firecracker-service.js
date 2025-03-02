@@ -54,8 +54,9 @@ class FirecrackerService {
         const baseRootfsPath = path.join(this.rootfsDir, 'base.ext4');
         
         try {
-            // Copy base rootfs to new image
-            execSync(`cp ${baseRootfsPath} ${imagePath}`);
+            // Create a new image with more space (4GB)
+            execSync(`dd if=/dev/zero of=${imagePath} bs=1M count=4096`);
+            execSync(`mkfs.ext4 ${imagePath}`);
             
             // Mount the image
             const mountPoint = `/tmp/mount-${imageId}`;
@@ -63,8 +64,15 @@ class FirecrackerService {
             execSync(`mount -o loop ${imagePath} ${mountPoint}`);
 
             try {
+                // Copy base system files from base rootfs
+                execSync(`mount -o loop ${baseRootfsPath} /tmp/base-rootfs`);
+                execSync(`cp -a /tmp/base-rootfs/. ${mountPoint}/`);
+                execSync(`umount /tmp/base-rootfs`);
+
                 // Create necessary directories
                 execSync(`mkdir -p ${mountPoint}/app`);
+                execSync(`mkdir -p ${mountPoint}/var/cache/apt/archives`);
+                execSync(`mkdir -p ${mountPoint}/var/lib/apt/lists`);
 
                 // Copy files to the image
                 for (const file of files) {
@@ -141,13 +149,18 @@ class FirecrackerService {
                 echo "" > /var/lib/dpkg/status
             fi
 
+            # Mount required filesystems
+            mount -t devpts devpts /dev/pts
+            mount -t proc proc /proc
+
             # Update package lists
             apt-get clean
             rm -rf /var/lib/apt/lists/*
             apt-get update
 
-            # Install essential packages
-            DEBIAN_FRONTEND=noninteractive apt-get install -y software-properties-common gnupg wget
+            # Install essential packages first
+            DEBIAN_FRONTEND=noninteractive apt-get install -y apt-utils
+            DEBIAN_FRONTEND=noninteractive apt-get install -y software-properties-common gnupg wget ca-certificates
         `;
         
         switch(language) {
@@ -184,8 +197,14 @@ class FirecrackerService {
                     chmod 755 /app
                 `;
                 break;
-            // Add more languages as needed
         }
+
+        // Cleanup
+        script += `
+            # Cleanup to save space
+            apt-get clean
+            rm -rf /var/lib/apt/lists/*
+        `;
 
         return script;
     }
