@@ -37,9 +37,9 @@ RUN mkdir -p /var/lib/firecracker/{kernels,rootfs,images} && \
     chmod -R 755 /var/lib/firecracker /kiln
 
 WORKDIR /kiln_api
-COPY ["package.json", "./"]
+COPY kiln/api/package.json ./
 RUN npm install
-COPY ./src ./src
+COPY kiln/api/src ./src
 RUN chmod +x ./src/api-entrypoint.sh && \
     find . -type f -name "*.sh" -exec chmod +x {} \; && \
     chown -R kiln:kiln .
