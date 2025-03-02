@@ -1,19 +1,25 @@
 FROM alpine:latest
 
+# Install required packages
 RUN apk add --no-cache e2fsprogs util-linux
 
 WORKDIR /build
 
 # Create and format the rootfs image
-RUN dd if=/dev/zero of=base.ext4 bs=1M count=200 && \
-    mkfs.ext4 base.ext4 && \
-    mkdir -p /mnt/rootfs
-
-# Create the rootfs contents
 RUN set -ex && \
-    # Setup loop device
-    losetup -f base.ext4 && \
-    LOOP_DEV=$(losetup -j base.ext4 | cut -d: -f1) && \
+    # Create the ext4 file
+    dd if=/dev/zero of=base.ext4 bs=1M count=200 && \
+    mkfs.ext4 base.ext4 && \
+    mkdir -p /mnt/rootfs && \
+    # Create loop devices if they don't exist
+    for i in $(seq 0 7); do \
+        if [ ! -e /dev/loop$i ]; then \
+            mknod -m 0660 /dev/loop$i b 7 $i; \
+        fi; \
+    done && \
+    # Setup loop device and mount
+    LOOP_DEV=$(losetup -f) && \
+    losetup $LOOP_DEV base.ext4 && \
     mount $LOOP_DEV /mnt/rootfs && \
     # Install required packages and setup
     apk add --no-cache openrc util-linux && \
