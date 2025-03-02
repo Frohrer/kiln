@@ -362,16 +362,27 @@ class FirecrackerService {
         // Create a script to setup the environment
         const setupScript = this.generateSetupScript(language, version);
         const scriptPath = path.join(mountPoint, 'setup.sh');
-        fs.writeFileSync(scriptPath, setupScript);
-        fs.chmodSync(scriptPath, 0o755);
+        
+        // Write the script with proper permissions
+        fs.writeFileSync(scriptPath, setupScript, { mode: 0o755 });
+        execSync(`chmod 755 ${scriptPath}`);
 
-        // Execute setup in chroot
-        execSync(`chroot ${mountPoint} /setup.sh`);
+        try {
+            // Execute setup in chroot
+            execSync(`chroot ${mountPoint} /setup.sh`);
+        } finally {
+            // Clean up the script
+            try {
+                fs.unlinkSync(scriptPath);
+            } catch (error) {
+                logger.warn(`Failed to remove setup script: ${error.message}`);
+            }
+        }
     }
 
     generateSetupScript(language, version) {
         let script = '#!/bin/bash\n';
-        script += 'set -e\n'; // Exit on error
+        script += 'set -ex\n'; // Exit on error and print commands
         script += 'export DEBIAN_FRONTEND=noninteractive\n';
         
         // Add base system setup
@@ -485,6 +496,8 @@ class FirecrackerService {
             # Unmount filesystems
             umount /dev/pts || true
             umount /proc || true
+
+            exit 0
         `;
 
         return script;
