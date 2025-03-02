@@ -61,17 +61,31 @@ class Runtime {
 				return;
 			}
 
-			runtimes.push(
-				new Runtime({
-					language,
-					version: semver.parse(version),
-					aliases: [],
-					vmImage: package_dir,
-					...Runtime.compute_all_limits(language),
-				})
-			);
+			// Parse version and ensure it's valid
+			const parsedVersion = semver.coerce(version);
+			if (!parsedVersion) {
+				logger.error(`Invalid version format: ${version}`);
+				return;
+			}
 
-			logger.debug(`Registered Firecracker runtime ${language}-${version}`);
+			const runtime = new Runtime({
+				language,
+				version: parsedVersion,
+				aliases: [],
+				vmImage: package_dir,
+				...Runtime.compute_all_limits(language),
+			});
+
+			// Remove any existing runtime with same language and version
+			const existingIndex = runtimes.findIndex(rt => 
+				rt.language === language && rt.version.raw === parsedVersion.raw
+			);
+			if (existingIndex !== -1) {
+				runtimes.splice(existingIndex, 1);
+			}
+
+			runtimes.push(runtime);
+			logger.debug(`Registered Firecracker runtime ${language}-${parsedVersion.raw}`);
 			return;
 		}
 

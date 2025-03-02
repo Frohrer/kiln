@@ -145,21 +145,43 @@ class FirecrackerService {
             apt-get clean
             rm -rf /var/lib/apt/lists/*
             apt-get update
+
+            # Install essential packages
+            DEBIAN_FRONTEND=noninteractive apt-get install -y software-properties-common gnupg wget
         `;
         
         switch(language) {
             case 'python':
                 script += `
+                    # Add deadsnakes PPA for Python versions
+                    add-apt-repository -y ppa:deadsnakes/ppa
+                    apt-get update
+
                     # Install Python and dependencies
-                    DEBIAN_FRONTEND=noninteractive apt-get install -y python${version} python${version}-pip
+                    DEBIAN_FRONTEND=noninteractive apt-get install -y python${version} python${version}-distutils
+
+                    # Install pip
+                    wget https://bootstrap.pypa.io/get-pip.py
+                    python${version} get-pip.py
+                    rm get-pip.py
+
+                    # Create symlinks
                     ln -sf /usr/bin/python${version} /usr/bin/python
-                    ln -sf /usr/bin/pip${version} /usr/bin/pip
+                    ln -sf /usr/local/bin/pip${version} /usr/bin/pip
+
+                    # Create app directory
+                    mkdir -p /app
+                    chmod 755 /app
                 `;
                 break;
             case 'nodejs':
                 script += `
                     curl -fsSL https://deb.nodesource.com/setup_${version}.x | bash -
                     DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
+
+                    # Create app directory
+                    mkdir -p /app
+                    chmod 755 /app
                 `;
                 break;
             // Add more languages as needed
