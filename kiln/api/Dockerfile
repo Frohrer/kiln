@@ -48,8 +48,8 @@ RUN curl -Lo firecracker https://github.com/firecracker-microvm/firecracker/rele
 RUN mkdir -p /var/lib/firecracker/{kernels,rootfs,images} && \
     mkdir -p /kiln && \
     mkdir -p /tmp/mount-python-3.12 && \
-    chown -R root:root /var/lib/firecracker && \
-    chmod -R 755 /var/lib/firecracker && \
+    chown -R kiln:kiln /var/lib/firecracker && \
+    chmod -R 775 /var/lib/firecracker && \
     chown -R kiln:kiln /kiln /tmp/mount-python-3.12 && \
     chmod -R 755 /kiln /tmp/mount-python-3.12
 
@@ -74,6 +74,11 @@ if [ ! -e /dev/kvm ]; then\n\
 fi\n\
 chown root:kvm /dev/kvm\n\
 chmod 660 /dev/kvm\n\
+\n\
+# Ensure Firecracker directories exist with proper permissions\n\
+mkdir -p /var/lib/firecracker/{kernels,rootfs,images}\n\
+chown -R kiln:kiln /var/lib/firecracker\n\
+chmod -R 775 /var/lib/firecracker\n\
 \n\
 # Run the actual entrypoint script as kiln user\n\
 exec gosu kiln /bin/bash ./src/api-entrypoint.sh' > /usr/local/bin/entrypoint-wrapper.sh && \
