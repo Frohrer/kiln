@@ -332,5 +332,15 @@ def get_processes():
         logger.error(f"Error fetching processes: {e}", exc_info=True)
         return jsonify({"error": "Failed to fetch processes"}), 500
 
+@app.route('/processes')
+def processes():
+    """Render the processes page."""
+    try:
+        logger.debug("Rendering processes page")
+        return render_template('processes.html')
+    except Exception as e:
+        logger.error(f"Error rendering processes page: {e}", exc_info=True)
+        return "Internal Server Error", 500
+
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=5000, debug=True)

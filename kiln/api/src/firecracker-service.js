@@ -302,16 +302,19 @@ class FirecrackerService {
                 const options = {
                     agent,
                     method,
+                    path,
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Accept': '*/*'
                     }
                 };
 
                 if (body) {
                     const bodyStr = JSON.stringify(body);
+                    options.headers['Content-Type'] = 'application/json';
                     options.headers['Content-Length'] = Buffer.byteLength(bodyStr);
                 }
 
+                // Wait for socket to be available
                 const req = http.request(options, (res) => {
                     let data = '';
                     res.on('data', chunk => data += chunk);
@@ -333,10 +336,10 @@ class FirecrackerService {
             });
         };
 
-        // Wait for the socket to be available
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-
         try {
+            // Wait for the socket to be available
+            await new Promise(resolve => setTimeout(resolve, 1000));
+
             // Configure boot source
             await makeRequest('PUT', '/boot-source', config.boot_source);
 

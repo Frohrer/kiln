@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="fas fa-cogs me-2"></i>Active Processes
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover" id="processes-table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Runtime</th>
+                                <th>Status</th>
+                                <th>Memory Usage</th>
+                                <th>CPU Usage</th>
+                                <th>Started</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="processes-body">
+                            <!-- Processes will be populated via JavaScript -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    function updateProcesses() {
+        fetch('/api/metrics')
+            .then(response => response.json())
+            .then(data => {
+                const tbody = document.getElementById('processes-body');
+                tbody.innerHTML = '';
+                
+                if (data.processes && data.processes.length > 0) {
+                    data.processes.forEach(process => {
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                            <td>${process.id}</td>
+                            <td>${process.runtime || 'N/A'}</td>
+                            <td><span class="badge bg-${process.status === 'running' ? 'success' : 'secondary'}">${process.status}</span></td>
+                            <td>${process.memory_usage ? Math.round(process.memory_usage) + ' MB' : 'N/A'}</td>
+                            <td>${process.cpu_usage ? Math.round(process.cpu_usage) + '%' : 'N/A'}</td>
+                            <td>${new Date(process.start_time).toLocaleString()}</td>
+                            <td>
+                                <button class="btn btn-sm btn-danger" onclick="terminateProcess('${process.id}')">
+                                    <i class="fas fa-stop"></i> Stop
+                                </button>
+                            </td>
+                        `;
+                        tbody.appendChild(row);
+                    });
+                } else {
+                    const row = document.createElement('tr');
+                    row.innerHTML = '<td colspan="7" class="text-center">No active processes</td>';
+                    tbody.appendChild(row);
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching processes:', error);
+                const tbody = document.getElementById('processes-body');
+                tbody.innerHTML = '<tr><td colspan="7" class="text-center text-danger">Failed to fetch processes</td></tr>';
+            });
+    }
+
+    function terminateProcess(processId) {
+        if (confirm('Are you sure you want to stop this process?')) {
+            fetch(`/api/process/${processId}`, { method: 'DELETE' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        alert('Failed to stop process: ' + data.error);
+                    } else {
+                        updateProcesses();
+                    }
+                })
+                .catch(error => {
+                    console.error('Error terminating process:', error);
+                    alert('Failed to stop process');
+                });
+        }
+    }
+
+    // Update processes every 5 seconds
+    updateProcesses();
+    setInterval(updateProcesses, 5000);
+});
+</script>
+{% endblock %} 
