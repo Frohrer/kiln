@@ -576,16 +576,33 @@ router.delete("/process/:id", async(req, res) => {
 });
 
 router.get("/runtimes", (req, res) => {
-    const runtimes = runtime.map((rt) => {
-        return {
-            language: rt.language,
-            version: rt.version.raw,
-            aliases: rt.aliases,
-            runtime: rt.runtime,
-        };
-    });
+    const availableRuntimes = runtime.get_available_runtimes().map(rt => ({
+        language: rt.language,
+        version: rt.version.raw,
+        aliases: rt.aliases,
+        runtime: rt.runtime,
+        available: rt.available,
+        vmImage: rt.vmImage ? path.basename(rt.vmImage) : null,
+        limits: {
+            memory: {
+                run: rt.memory_limits.run,
+                compile: rt.memory_limits.compile
+            },
+            cpu: {
+                run: rt.cpu_times.run,
+                compile: rt.cpu_times.compile
+            },
+            timeout: {
+                run: rt.timeouts.run,
+                compile: rt.timeouts.compile
+            }
+        }
+    }));
 
-    return res.status(200).send(runtimes);
+    return res.status(200).json({
+        count: availableRuntimes.length,
+        runtimes: availableRuntimes
+    });
 });
 
 router.get("/process/:id/timing", (req, res) => {

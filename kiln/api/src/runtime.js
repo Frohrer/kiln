@@ -21,7 +21,29 @@ class Runtime {
 		this.max_open_files = max_open_files;
 		this.max_file_size = max_file_size;
 		this.output_max_size = output_max_size;
-		this.vmImage = vmImage; // Path to Firecracker VM image
+		this.vmImage = vmImage;
+		this.available = this.checkImageAvailability();
+	}
+
+	checkImageAvailability() {
+		if (!this.vmImage) return false;
+		try {
+			return fss.existsSync(this.vmImage);
+		} catch (error) {
+			logger.error(`Error checking image availability for ${this.language}-${this.version.raw}: ${error}`);
+			return false;
+		}
+	}
+
+	toJSON() {
+		return {
+			language: this.language,
+			version: this.version.raw,
+			aliases: this.aliases,
+			runtime: this.runtime,
+			available: this.available,
+			vmImage: path.basename(this.vmImage || '')
+		};
 	}
 
 	static compute_single_limit(language_name, limit_name, language_limit_overrides) {
@@ -49,83 +71,40 @@ class Runtime {
 		};
 	}
 
-	static load_package(package_dir) {
-		// Support both traditional packages and Firecracker VM images
-		if (package_dir.endsWith('.ext4')) {
-			// This is a Firecracker VM image
-			const filename = path.basename(package_dir, '.ext4');
-			const [language, version] = filename.split('-');
-			
-			if (!language || !version) {
-				logger.error(`Invalid VM image filename format: ${filename}`);
-				return;
+	static load_package(pkgdir) {
+		try {
+			const pkg_json_path = path.join(pkgdir, globals.pkg_installed_file);
+			if (!fss.existsSync(pkg_json_path)) {
+				throw new Error(`Package manifest not found at ${pkg_json_path}`);
 			}
 
-			// Parse version and ensure it's valid
-			const parsedVersion = semver.coerce(version);
-			if (!parsedVersion) {
-				logger.error(`Invalid version format: ${version}`);
-				return;
+			const pkg_json = JSON.parse(fss.readFileSync(pkg_json_path));
+			const version = semver.parse(pkg_json.version);
+			if (!version) {
+				throw new Error(`Invalid version ${pkg_json.version}`);
 			}
 
+			const limits = Runtime.compute_all_limits(pkg_json.language, pkg_json.limits);
 			const runtime = new Runtime({
-				language,
-				version: parsedVersion,
-				aliases: [],
-				vmImage: package_dir,
-				...Runtime.compute_all_limits(language),
+				language: pkg_json.language,
+				version,
+				aliases: pkg_json.aliases,
+				pkgdir,
+				runtime: pkg_json.runtime,
+				...limits,
+				vmImage: pkgdir.endsWith('.ext4') ? pkgdir : null
 			});
 
-			// Remove any existing runtime with same language and version
-			const existingIndex = runtimes.findIndex(rt => 
-				rt.language === language && rt.version.raw === parsedVersion.raw
-			);
-			if (existingIndex !== -1) {
-				runtimes.splice(existingIndex, 1);
+			// Only register if the image is available
+			if (runtime.available) {
+				runtimes.push(runtime);
+				logger.info(`Registered runtime ${runtime.language}-${runtime.version.raw}`);
+			} else {
+				logger.warn(`Skipping unavailable runtime ${runtime.language}-${runtime.version.raw}`);
 			}
-
-			runtimes.push(runtime);
-			logger.debug(`Registered Firecracker runtime ${language}-${parsedVersion.raw}`);
-			return;
+		} catch (error) {
+			logger.error(`Failed to load package at ${pkgdir}:`, error);
 		}
-
-		// Traditional package loading
-		let info = JSON.parse(fss.read_file_sync(path.join(package_dir, "pkg-info.json")));
-
-		let { language, version, build_platform, aliases, provides, limit_overrides } = info;
-		version = semver.parse(version);
-
-		if (build_platform !== globals.platform) {
-			logger.warn(`Package ${language}-${version} was built for platform ${build_platform}, ` + `but our platform is ${globals.platform}`);
-		}
-
-		if (provides) {
-			// Multiple languages in 1 package
-			provides.forEach((lang) => {
-				runtimes.push(
-					new Runtime({
-						language: lang.language,
-						aliases: lang.aliases,
-						version,
-						pkgdir: package_dir,
-						runtime: language,
-						...Runtime.compute_all_limits(lang.language, lang.limit_overrides),
-					})
-				);
-			});
-		} else {
-			runtimes.push(
-				new Runtime({
-					language,
-					version,
-					aliases,
-					pkgdir: package_dir,
-					...Runtime.compute_all_limits(language, limit_overrides),
-				})
-			);
-		}
-
-		logger.debug(`Package ${language}-${version} was loaded`);
 	}
 
 	get compiled() {
@@ -165,17 +144,21 @@ class Runtime {
 	}
 }
 
-module.exports = runtimes;
-module.exports.Runtime = Runtime;
-module.exports.get_runtimes_matching_language_version = function (lang, ver) {
-	return runtimes.filter((rt) => (rt.language == lang || rt.aliases.includes(lang)) && semver.satisfies(rt.version, ver));
+module.exports = {
+	runtimes,
+	Runtime,
+	get_runtimes_matching_language_version: function (lang, ver) {
+		return runtimes.filter((rt) => (rt.language == lang || rt.aliases.includes(lang)) && semver.satisfies(rt.version, ver));
+	},
+	get_latest_runtime_matching_language_version: function (lang, ver) {
+		return module.exports.get_runtimes_matching_language_version(lang, ver).sort((a, b) => semver.rcompare(a.version, b.version))[0];
+	},
+	get_runtime_by_name_and_version: function (runtime, ver) {
+		return runtimes.find((rt) => (rt.runtime == runtime || (rt.runtime === undefined && rt.language == runtime)) && semver.satisfies(rt.version, ver));
+	},
+	get_available_runtimes: function () {
+		return runtimes.filter(rt => rt.available);
+	},
+	load_package: Runtime.load_package,
+	map: runtimes
 };
-module.exports.get_latest_runtime_matching_language_version = function (lang, ver) {
-	return module.exports.get_runtimes_matching_language_version(lang, ver).sort((a, b) => semver.rcompare(a.version, b.version))[0];
-};
-
-module.exports.get_runtime_by_name_and_version = function (runtime, ver) {
-	return runtimes.find((rt) => (rt.runtime == runtime || (rt.runtime === undefined && rt.language == runtime)) && semver.satisfies(rt.version, ver));
-};
-
-module.exports.load_package = Runtime.load_package;
