@@ -8,7 +8,8 @@ RUN apt-get update && \
     libncurses6 libncurses5 libedit-dev libseccomp-dev rename procps python3 \
     libreadline-dev libblas-dev liblapack-dev libpcre3-dev libarpack2-dev \
     libfftw3-dev libglpk-dev libqhull-dev libqrupdate-dev libsuitesparse-dev \
-    libsundials-dev libpcre2-dev libcap-dev curl wget iproute2 jq docker.io e2fsprogs && \
+    libsundials-dev libpcre2-dev libcap-dev curl wget iproute2 jq docker.io e2fsprogs \
+    bc flex bison libelf-dev && \
     rm -rf /var/lib/apt/lists/*
 
 # Install KVM kernel module and required tools
@@ -29,15 +30,55 @@ RUN curl -Lo firecracker https://github.com/firecracker-microvm/firecracker/rele
     chmod +x firecracker && \
     mv firecracker /usr/local/bin/
 
-# Set up Firecracker directories and create rootfs
+# Build custom kernel and create rootfs
 RUN set -e && \
     ARCH="$(uname -m)" && \
     # Create necessary directories
     mkdir -p /var/lib/firecracker/{kernels,rootfs,images} && \
     mkdir -p /kiln && \
-    # Download kernel
-    wget --progress=dot:giga -O /var/lib/firecracker/kernels/vmlinux \
-    "https://github.com/firecracker-microvm/firecracker/releases/download/v1.5.0/vmlinux-5.10.x86_64" && \
+    # Clone and build Linux kernel
+    cd /tmp && \
+    git clone --depth 1 --branch v5.10 https://github.com/torvalds/linux.git linux.git && \
+    cd linux.git && \
+    # Basic kernel config for Firecracker
+    echo 'CONFIG_SERIAL_8250=y' > .config && \
+    echo 'CONFIG_SERIAL_8250_CONSOLE=y' >> .config && \
+    echo 'CONFIG_EXT4_FS=y' >> .config && \
+    echo 'CONFIG_VIRTIO_BLK=y' >> .config && \
+    echo 'CONFIG_VIRTIO_NET=y' >> .config && \
+    echo 'CONFIG_VIRTIO=y' >> .config && \
+    echo 'CONFIG_VIRTIO_PCI=y' >> .config && \
+    echo 'CONFIG_VIRTIO_MMIO=y' >> .config && \
+    echo 'CONFIG_NET_9P=y' >> .config && \
+    echo 'CONFIG_NET_9P_VIRTIO=y' >> .config && \
+    echo 'CONFIG_9P_FS=y' >> .config && \
+    echo 'CONFIG_SQUASHFS=y' >> .config && \
+    echo 'CONFIG_SQUASHFS_XZ=y' >> .config && \
+    echo 'CONFIG_DEVTMPFS=y' >> .config && \
+    echo 'CONFIG_CGROUPS=y' >> .config && \
+    echo 'CONFIG_INOTIFY_USER=y' >> .config && \
+    echo 'CONFIG_SIGNALFD=y' >> .config && \
+    echo 'CONFIG_TIMERFD=y' >> .config && \
+    echo 'CONFIG_EPOLL=y' >> .config && \
+    echo 'CONFIG_NR_CPUS=1' >> .config && \
+    echo 'CONFIG_EMBEDDED=y' >> .config && \
+    echo 'CONFIG_SYSFS=y' >> .config && \
+    echo 'CONFIG_PROC_FS=y' >> .config && \
+    echo 'CONFIG_NAMESPACES=y' >> .config && \
+    echo 'CONFIG_UNIX=y' >> .config && \
+    echo 'CONFIG_POSIX_MQUEUE=y' >> .config && \
+    echo 'CONFIG_FUTEX=y' >> .config && \
+    echo 'CONFIG_SHMEM=y' >> .config && \
+    echo 'CONFIG_PRINTK=y' >> .config && \
+    echo 'CONFIG_BUG=y' >> .config && \
+    echo 'CONFIG_PCIEPORTBUS=y' >> .config && \
+    echo 'CONFIG_PCI_MSI=y' >> .config && \
+    echo 'CONFIG_DEBUG_KERNEL=n' >> .config && \
+    echo 'CONFIG_SMP=n' >> .config && \
+    make olddefconfig && \
+    make -j$(nproc) vmlinux && \
+    cp vmlinux /var/lib/firecracker/kernels/ && \
+    cd / && rm -rf /tmp/linux.git && \
     # Create rootfs
     dd if=/dev/zero of=/var/lib/firecracker/rootfs/base.ext4 bs=1M count=200 && \
     mkfs.ext4 /var/lib/firecracker/rootfs/base.ext4 && \
