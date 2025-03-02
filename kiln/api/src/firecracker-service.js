@@ -352,8 +352,16 @@ class FirecrackerService {
             // Wait a bit more for Firecracker to be ready
             await new Promise(resolve => setTimeout(resolve, 1000));
 
+            // Handle version number differences by extracting major.minor
+            const versionMatch = imageId.match(/^([^-]+)-(\d+\.\d+)/);
+            if (!versionMatch) {
+                throw new Error(`Invalid imageId format: ${imageId}`);
+            }
+            const [, language, version] = versionMatch;
+            const normalizedImageId = `${language}-${version}`;
+
             // Get the actual image path
-            const imagePath = path.join(this.imagesDir, `${imageId}.ext4`);
+            const imagePath = path.join(this.imagesDir, `${normalizedImageId}.ext4`);
             
             // Verify the image exists
             if (!fs.existsSync(imagePath)) {
