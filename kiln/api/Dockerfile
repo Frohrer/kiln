@@ -8,7 +8,8 @@ RUN apt-get update && \
     libncurses6 libncurses5 libedit-dev libseccomp-dev rename procps python3 \
     libreadline-dev libblas-dev liblapack-dev libpcre3-dev libarpack2-dev \
     libfftw3-dev libglpk-dev libqhull-dev libqrupdate-dev libsuitesparse-dev \
-    libsundials-dev libpcre2-dev libcap-dev curl wget iproute2 jq docker.io e2fsprogs && \
+    libsundials-dev libpcre2-dev libcap-dev curl wget iproute2 jq docker.io e2fsprogs \
+    gosu && \
     rm -rf /var/lib/apt/lists/*
 
 # Install KVM kernel module and required tools
@@ -30,13 +31,8 @@ RUN curl -Lo firecracker https://github.com/firecracker-microvm/firecracker/rele
     mv firecracker /usr/local/bin/
 
 # Set up Firecracker directories
-RUN set -ex && \
-    # Create necessary directories
-    mkdir -p /var/lib/firecracker/kernels && \
-    mkdir -p /var/lib/firecracker/rootfs && \
-    mkdir -p /var/lib/firecracker/images && \
+RUN mkdir -p /var/lib/firecracker/{kernels,rootfs,images} && \
     mkdir -p /kiln && \
-    # Set permissions
     chown -R kiln:kiln /var/lib/firecracker /kiln && \
     chmod -R 755 /var/lib/firecracker /kiln
 
@@ -48,7 +44,7 @@ RUN chmod +x ./src/api-entrypoint.sh && \
     find . -type f -name "*.sh" -exec chmod +x {} \; && \
     chown -R kiln:kiln .
 
-USER kiln
+# Run as root initially, the entrypoint script will drop privileges
 ENTRYPOINT ["/bin/bash", "./src/api-entrypoint.sh"]
 EXPOSE 2000
 EXPOSE 2020

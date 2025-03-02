@@ -1,78 +1,52 @@
 #!/bin/bash
+set -e
 
-# Install required system utilities
-echo "Installing required system utilities..."
-apt-get update
-apt-get install -y \
-    kmod \
-    util-linux \
-    iproute2 \
-    procps \
-    systemd \
-    fuse \
-    psmisc
-
-# Function to download Firecracker
-download_firecracker() {
-    local version="v1.5.0"
-    local arch="x86_64"
-    local base_url="https://github.com/firecracker-microvm/firecracker/releases/download"
-    
-    echo "Downloading Firecracker ${version}..."
-    
-    # Download binary
-    curl -L -o /usr/local/bin/firecracker "${base_url}/${version}/firecracker-${version}-${arch}.tgz"
-    
-    # Extract the binary
-    cd /usr/local/bin
-    tar xvf firecracker
-    rm firecracker # Remove the tar file
-    mv release-${version}-${arch}/firecracker-${version}-${arch} firecracker
-    rm -rf release-${version}-${arch}
-    
-    # Make it executable
-    chmod +x firecracker
-    
-    # Test the binary
-    if ! ./firecracker --version &> /dev/null; then
-        echo "Binary verification failed!"
-        rm -f firecracker
+# Function to check if Firecracker is installed
+check_firecracker() {
+    if ! command -v firecracker &> /dev/null || ! firecracker --version &> /dev/null; then
         return 1
     fi
-    
     return 0
 }
 
-# Verify and setup Firecracker binary
-if [ ! -f /usr/local/bin/firecracker ] || ! /usr/local/bin/firecracker --version &> /dev/null; then
-    echo "Firecracker binary not found or invalid. Downloading..."
-    if ! download_firecracker; then
-        echo "Failed to download Firecracker binary"
-        exit 1
+# Function to install system dependencies
+install_dependencies() {
+    echo "Installing required system utilities..."
+    apt-get update
+    apt-get install -y curl wget tar
+}
+
+# Function to download and install Firecracker
+install_firecracker() {
+    echo "Downloading Firecracker v1.5.0..."
+    curl -Lo firecracker https://github.com/firecracker-microvm/firecracker/releases/download/v1.5.0/firecracker-v1.5.0-x86_64
+    chmod +x firecracker
+    mv firecracker /usr/local/bin/
+}
+
+# Run setup tasks as root
+if [ "$(id -u)" = "0" ]; then
+    # Install dependencies if needed
+    if ! command -v curl &> /dev/null; then
+        install_dependencies
     fi
+
+    # Install Firecracker if needed
+    if ! check_firecracker; then
+        install_firecracker
+    fi
+
+    # Ensure directories exist and have correct permissions
+    mkdir -p /var/lib/firecracker/{kernels,rootfs,images}
+    mkdir -p /kiln
+    chown -R kiln:kiln /var/lib/firecracker /kiln
+    chmod -R 755 /var/lib/firecracker /kiln
+
+    # Drop privileges and run the actual application
+    exec gosu kiln "$0" "$@"
+else
+    # Application code here (running as kiln user)
+    echo "Starting Kiln API service..."
+    cd /kiln_api
+    exec node src/index.js
 fi
-
-chmod +x /usr/local/bin/firecracker
-chown root:root /usr/local/bin/firecracker
-
-# Verify binary is valid
-echo "Verifying Firecracker binary..."
-if ! /usr/local/bin/firecracker --version; then
-    echo "Error: Firecracker binary is invalid or corrupted"
-    exit 1
-fi
-
-# Setup KVM
-if [ ! -e /dev/kvm ]; then
-    mknod /dev/kvm c 10 232
-fi
-chmod 666 /dev/kvm
-
-# Setup network for Firecracker
-ip tuntap add tap0 mode tap
-ip addr add 172.16.0.1/24 dev tap0
-ip link set tap0 up
-
-# Start the API server
-cd /kiln_api
-exec node src/index.js
