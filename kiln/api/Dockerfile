@@ -29,16 +29,17 @@ RUN curl -Lo firecracker https://github.com/firecracker-microvm/firecracker/rele
     chmod +x firecracker && \
     mv firecracker /usr/local/bin/
 
-# Create directories, set permissions, and download Firecracker assets
-RUN mkdir -p /var/lib/firecracker/{kernels,rootfs,images} && \
+# Set up Firecracker directories and download assets
+RUN ARCH="$(uname -m)" && \
+    # Create necessary directories
+    mkdir -p /var/lib/firecracker/{kernels,rootfs,images} && \
     mkdir -p /kiln && \
-    chown -R kiln:kiln /var/lib/firecracker /kiln && \
-    chmod -R 755 /var/lib/firecracker /kiln && \
     # Download kernel and rootfs
-    wget https://s3.amazonaws.com/spec.ccfc.min/img/quickstart_guide/x86_64/kernels/vmlinux.bin -O /var/lib/firecracker/kernels/vmlinux && \
-    wget https://s3.amazonaws.com/spec.ccfc.min/img/quickstart_guide/x86_64/rootfs/bionic.rootfs.ext4 -O /var/lib/firecracker/rootfs/base.ext4 && \
-    # Ensure proper ownership of downloaded files
-    chown -R kiln:kiln /var/lib/firecracker
+    wget -O /var/lib/firecracker/kernels/vmlinux "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.7/${ARCH}/vmlinux-5.10.204" && \
+    wget -O /var/lib/firecracker/rootfs/base.ext4 "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.7/${ARCH}/ubuntu-22.04.ext4" && \
+    # Set permissions
+    chown -R kiln:kiln /var/lib/firecracker /kiln && \
+    chmod -R 755 /var/lib/firecracker /kiln
 
 WORKDIR /kiln_api
 COPY ["package.json", "./"]
