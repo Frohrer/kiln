@@ -437,4 +437,54 @@ class FirecrackerService {
                 throw new Error(`Image not found at ${imagePath}`);
             }
 
-            logger.debug(`
+            logger.debug(`Using image at path: ${imagePath}`);
+
+            // Configure the VM
+            const kernelPath = path.join(this.kernelsDir, 'vmlinux');
+            const vmConfig = {
+                boot_source: {
+                    kernel_image_path: kernelPath,
+                    boot_args: "console=ttyS0 reboot=k panic=1 pci=off"
+                },
+                drives: [
+                    {
+                        drive_id: "rootfs",
+                        path_on_host: imagePath,
+                        is_root_device: true,
+                        is_read_only: false
+                    }
+                ],
+                machine_config: {
+                    vcpu_count: 2,
+                    mem_size_mib: config.memory_limit || 512,
+                    smt: false
+                },
+                network_interfaces: [
+                    {
+                        iface_id: "eth0",
+                        guest_mac: "AA:FC:00:00:00:01",
+                        host_dev_name: "tap0"
+                    }
+                ]
+            };
+
+            // Store VM instance info
+            this.vmInstances.set(vmId, {
+                process: firecracker,
+                socketPath,
+                config: vmConfig
+            });
+
+            return {
+                vmId,
+                socketPath,
+                config: vmConfig
+            };
+        } catch (error) {
+            logger.error(`Failed to start VM: ${error}`);
+            throw error;
+        }
+    }
+}
+
+module.exports = new FirecrackerService();
