@@ -11,6 +11,7 @@ services:
         build: 
             context: .
             dockerfile: kiln/api/Dockerfile.rootfs-builder
+        privileged: true
         volumes:
             - rootfs-data:/output
 
