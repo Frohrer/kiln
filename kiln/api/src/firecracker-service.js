@@ -352,6 +352,16 @@ class FirecrackerService {
             // Wait a bit more for Firecracker to be ready
             await new Promise(resolve => setTimeout(resolve, 1000));
 
+            // Get the actual image path
+            const imagePath = path.join(this.imagesDir, `${imageId}.ext4`);
+            
+            // Verify the image exists
+            if (!fs.existsSync(imagePath)) {
+                throw new Error(`Image not found at ${imagePath}`);
+            }
+
+            logger.debug(`Using image at path: ${imagePath}`);
+
             // Configure VM via API
             const vmConfig = {
                 boot_source: {
@@ -360,7 +370,7 @@ class FirecrackerService {
                 },
                 drives: [{
                     drive_id: 'rootfs',
-                    path_on_host: path.join(this.imagesDir, `${imageId}.ext4`),
+                    path_on_host: imagePath,
                     is_root_device: true,
                     is_read_only: false
                 }],
