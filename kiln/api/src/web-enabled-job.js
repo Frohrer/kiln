@@ -133,9 +133,14 @@ class WebEnabledJob extends Job {
 
     async prime() {
         // Start VM using the runtime's VM image
+        const memoryLimitMB = Math.max(
+            Math.floor((this.memory_limits.run || 512 * 1024 * 1024) / (1024 * 1024)),
+            128  // Minimum 128MB
+        );
+
         const vmConfig = {
             cpu_count: 1,
-            memory_limit: Math.floor(this.memory_limits.run / (1024 * 1024)) // Convert bytes to MB
+            memory_limit: memoryLimitMB
         };
 
         // Get the image path from the runtime
