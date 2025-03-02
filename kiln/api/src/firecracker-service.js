@@ -406,23 +406,8 @@ class FirecrackerService {
                 let retries = 0;
                 
                 const tryConnect = () => {
-                    const agent = new Agent({
-                        createConnection: () => {
-                            const conn = createConnection({ path: socketPath });
-                            conn.on('error', (err) => {
-                                if (err.code === 'ENOENT' && retries < maxRetries) {
-                                    retries++;
-                                    setTimeout(tryConnect, 500);
-                                } else {
-                                    reject(err);
-                                }
-                            });
-                            return conn;
-                        }
-                    });
-
                     const options = {
-                        agent,
+                        socketPath,
                         method,
                         path,
                         headers: {
@@ -436,11 +421,14 @@ class FirecrackerService {
                         options.headers['Content-Length'] = Buffer.byteLength(bodyStr);
                     }
 
+                    logger.debug(`Making request to Firecracker API: ${method} ${path}`);
+                    
                     const req = http.request(options, (res) => {
                         let data = '';
                         res.on('data', chunk => data += chunk);
                         res.on('end', () => {
                             if (res.statusCode >= 200 && res.statusCode < 300) {
+                                logger.debug(`Firecracker API request successful: ${method} ${path}`);
                                 resolve(data ? JSON.parse(data) : undefined);
                             } else {
                                 reject(new Error(`Firecracker API request failed with status ${res.statusCode}: ${data}`));
@@ -449,7 +437,8 @@ class FirecrackerService {
                     });
 
                     req.on('error', (err) => {
-                        if (err.code === 'ENOENT' && retries < maxRetries) {
+                        if ((err.code === 'ENOENT' || err.code === 'ECONNREFUSED') && retries < maxRetries) {
+                            logger.debug(`Retrying connection to socket (attempt ${retries + 1}/${maxRetries})`);
                             retries++;
                             setTimeout(tryConnect, 500);
                         } else {
@@ -458,7 +447,9 @@ class FirecrackerService {
                     });
 
                     if (body) {
-                        req.write(JSON.stringify(body));
+                        const bodyStr = JSON.stringify(body);
+                        logger.debug(`Request body: ${bodyStr}`);
+                        req.write(bodyStr);
                     }
                     req.end();
                 };
@@ -512,12 +503,10 @@ class FirecrackerService {
         }
 
         try {
-            const agent = new Agent({
-                createConnection: () => createConnection(instance.socket)
-            });
-
+            logger.debug(`Stopping VM ${vmId}`);
+            
             const options = {
-                agent,
+                socketPath: instance.socket,
                 method: 'PUT',
                 path: '/actions',
                 headers: {
@@ -526,34 +515,45 @@ class FirecrackerService {
                 }
             };
 
+            const body = JSON.stringify({ action_type: 'SendCtrlAltDel' });
+            options.headers['Content-Length'] = Buffer.byteLength(body);
+
             await new Promise((resolve, reject) => {
+                logger.debug('Sending shutdown signal to VM');
                 const req = http.request(options, (res) => {
                     if (res.statusCode >= 200 && res.statusCode < 300) {
+                        logger.debug('Shutdown signal sent successfully');
                         resolve();
                     } else {
                         reject(new Error(`Failed to send shutdown signal: ${res.statusCode}`));
                     }
                 });
 
-                req.on('error', reject);
-                const body = JSON.stringify({ action_type: 'SendCtrlAltDel' });
-                req.setHeader('Content-Length', Buffer.byteLength(body));
+                req.on('error', (err) => {
+                    logger.error(`Error sending shutdown signal: ${err}`);
+                    reject(err);
+                });
+
                 req.write(body);
                 req.end();
             });
 
             // Wait for VM to shutdown
+            logger.debug('Waiting for VM to shutdown');
             await new Promise(resolve => setTimeout(resolve, 5000));
 
             // Force kill if still running
+            logger.debug('Force killing VM process');
             instance.process.kill();
 
             // Clean up socket file
             if (fs.existsSync(instance.socket)) {
+                logger.debug('Cleaning up socket file');
                 fs.unlinkSync(instance.socket);
             }
 
             this.vmInstances.delete(vmId);
+            logger.debug(`VM ${vmId} stopped successfully`);
             return true;
         } catch (error) {
             logger.error(`Failed to stop VM: ${error}`);
