@@ -10,7 +10,11 @@ RUN dd if=/dev/zero of=base.ext4 bs=1M count=200 && \
     mkdir -p /mnt/rootfs
 
 # Create the rootfs contents
-RUN mount base.ext4 /mnt/rootfs && \
+RUN set -ex && \
+    # Setup loop device
+    losetup -f base.ext4 && \
+    LOOP_DEV=$(losetup -j base.ext4 | cut -d: -f1) && \
+    mount $LOOP_DEV /mnt/rootfs && \
     # Install required packages and setup
     apk add --no-cache openrc util-linux && \
     ln -s agetty /etc/init.d/agetty.ttyS0 && \
@@ -24,7 +28,8 @@ RUN mount base.ext4 /mnt/rootfs && \
     # Create necessary directories
     for dir in dev proc run sys var; do mkdir /mnt/rootfs/${dir}; done && \
     # Cleanup
-    umount /mnt/rootfs
+    umount /mnt/rootfs && \
+    losetup -d $LOOP_DEV
 
 VOLUME /output
 CMD cp base.ext4 /output/base.ext4 

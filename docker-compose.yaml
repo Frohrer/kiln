@@ -12,6 +12,9 @@ services:
             context: ./kiln/api
             dockerfile: Dockerfile.rootfs-builder
         privileged: true
+        devices:
+            - /dev/loop-control:/dev/loop-control
+            - /dev/loop0:/dev/loop0
         volumes:
             - rootfs-data:/output
 
