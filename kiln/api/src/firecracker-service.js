@@ -56,24 +56,70 @@ class FirecrackerService {
         try {
             // Check if running in a VM
             let isInVM = false;
+            let vmType = '';
             try {
                 const isVM = execSync('which systemd-detect-virt && systemd-detect-virt || true').toString().trim();
                 isInVM = isVM !== 'none' && isVM !== '';
+                if (isInVM) {
+                    vmType = isVM;
+                }
             } catch (error) {
-                logger.warn('systemd-detect-virt not available, skipping VM detection');
+                // Try alternative VM detection methods
+                try {
+                    const dmiInfo = execSync('cat /sys/class/dmi/id/product_name 2>/dev/null || true').toString().trim();
+                    if (dmiInfo.includes('VMware') || dmiInfo.includes('VirtualBox') || dmiInfo.includes('Hyper-V')) {
+                        isInVM = true;
+                        vmType = dmiInfo;
+                    }
+                } catch (error) {
+                    logger.warn('Could not check DMI info for VM detection');
+                }
+
+                try {
+                    const cpuInfo = execSync('grep -i "^flags.*\( vmx\| svm\)" /proc/cpuinfo || true').toString().trim();
+                    if (cpuInfo.includes('vmx') || cpuInfo.includes('svm')) {
+                        logger.debug('CPU supports virtualization');
+                    }
+                } catch (error) {
+                    logger.warn('Could not check CPU virtualization support');
+                }
             }
-            
+
             // Check if KVM module is loaded
             try {
                 const lsmodExists = execSync('which lsmod || true').toString().trim();
                 if (!lsmodExists) {
-                    throw new Error('lsmod command not found. Please ensure kmod package is installed.');
+                    logger.warn('lsmod command not found, checking /proc/modules directly');
+                    try {
+                        const modules = execSync('cat /proc/modules').toString();
+                        if (!modules.includes('kvm')) {
+                            throw new Error('KVM module not found in /proc/modules');
+                        }
+                    } catch (error) {
+                        if (isInVM) {
+                            logger.error('Running in VM environment, but KVM module is not loaded');
+                            logger.error('VM Type detected:', vmType);
+                            logger.error('Please ensure:');
+                            logger.error('1. Nested virtualization is enabled in your hypervisor settings');
+                            logger.error('2. Your host system has KVM support enabled in BIOS/UEFI');
+                            logger.error('3. The KVM module is loaded on your host system');
+                            throw new Error(`KVM module is not loaded. Since you are running in a VM (${vmType}), please ensure nested virtualization is enabled in your hypervisor settings.`);
+                        } else {
+                            throw new Error('KVM module is not loaded. Please ensure KVM is enabled in BIOS/UEFI and the kvm module is loaded.');
+                        }
+                    }
                 }
                 
                 const lsmod = execSync('lsmod | grep kvm || true').toString();
                 if (!lsmod.includes('kvm')) {
                     if (isInVM) {
-                        throw new Error('KVM module is not loaded. Since you are running in a VM, please ensure nested virtualization is enabled in your hypervisor settings.');
+                        logger.error('Running in VM environment, but KVM module is not loaded');
+                        logger.error('VM Type detected:', vmType);
+                        logger.error('Please ensure:');
+                        logger.error('1. Nested virtualization is enabled in your hypervisor settings');
+                        logger.error('2. Your host system has KVM support enabled in BIOS/UEFI');
+                        logger.error('3. The KVM module is loaded on your host system');
+                        throw new Error(`KVM module is not loaded. Since you are running in a VM (${vmType}), please ensure nested virtualization is enabled in your hypervisor settings.`);
                     } else {
                         throw new Error('KVM module is not loaded. Please ensure KVM is enabled in BIOS/UEFI and the kvm module is loaded.');
                     }
@@ -95,11 +141,17 @@ class FirecrackerService {
                         fs.readFileSync('/sys/module/kvm_amd/parameters/nested', 'utf8').trim() === '1';
                     
                     if (!nestedEnabled) {
+                        logger.error('Nested virtualization is not enabled');
+                        logger.error('VM Type detected:', vmType);
+                        logger.error('Please ensure:');
+                        logger.error('1. Nested virtualization is enabled in your hypervisor settings');
+                        logger.error('2. Your host system has KVM support enabled in BIOS/UEFI');
                         throw new Error('Nested virtualization is not enabled. Please enable it in your hypervisor settings.');
                     }
                     logger.debug('Nested virtualization is enabled');
                 } catch (error) {
                     if (!error.message.includes('ENOENT')) {
+                        logger.error('Error checking nested virtualization:', error);
                         throw new Error(`Failed to check nested virtualization status: ${error.message}`);
                     }
                 }
@@ -120,7 +172,7 @@ class FirecrackerService {
                 throw new Error('/dev/kvm is not accessible. Please ensure current user has proper permissions (usually needs to be in kvm group).');
             }
 
-            logger.debug(`KVM verification passed successfully${isInVM ? ' (running in VM with nested virtualization)' : ''}`);
+            logger.debug(`KVM verification passed successfully${isInVM ? ` (running in VM type: ${vmType})` : ''}`);
         } catch (error) {
             logger.error('KVM verification failed:', error);
             throw error;
