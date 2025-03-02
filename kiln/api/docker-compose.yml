@@ -7,8 +7,6 @@ services:
       dockerfile: Dockerfile.kernel-builder
     volumes:
       - kernel-data:/output
-    profiles:
-      - build-kernel
 
   rootfs-builder:
     build:
@@ -17,8 +15,6 @@ services:
     privileged: true  # Required for mount operations
     volumes:
       - rootfs-data:/output
-    profiles:
-      - build-rootfs
 
   api:
     build:
@@ -35,6 +31,11 @@ services:
       - SYS_ADMIN  # Required for mount operations
     security_opt:
       - apparmor:unconfined  # Required for nested containerization
+    depends_on:
+      kernel-builder:
+        condition: service_completed_successfully
+      rootfs-builder:
+        condition: service_completed_successfully
 
 volumes:
   kernel-data:

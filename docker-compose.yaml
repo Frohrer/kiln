@@ -1,5 +1,20 @@
 version: '3.2'
 services:
+    kernel-builder:
+        build: 
+            context: ./kiln/api
+            dockerfile: Dockerfile.kernel-builder
+        volumes:
+            - kernel-data:/output
+
+    rootfs-builder:
+        build: 
+            context: ./kiln/api
+            dockerfile: Dockerfile.rootfs-builder
+        privileged: true
+        volumes:
+            - rootfs-data:/output
+
     api:
         build: ./kiln/api/.
         container_name: kiln_api
@@ -10,6 +25,8 @@ services:
         privileged: true
         volumes:
             - ./data/kiln/packages:/kiln/packages
+            - kernel-data:/var/lib/firecracker/kernels
+            - rootfs-data:/var/lib/firecracker/rootfs
         environment:
             - kiln_DISABLE_NETWORKING=false
             - kiln_RUN_TIMEOUT=300000
@@ -22,6 +39,11 @@ services:
             - "2020:2020"
         networks:
             - kiln-network
+        depends_on:
+            kernel-builder:
+                condition: service_completed_successfully
+            rootfs-builder:
+                condition: service_completed_successfully
     # repo:
     #     build: ./kiln/repo/.
     #     container_name: kiln_repo
@@ -48,3 +70,5 @@ networks:
 
 volumes:
     kiln_repo_data:
+    kernel-data:
+    rootfs-data:
