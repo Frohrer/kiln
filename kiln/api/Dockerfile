@@ -14,11 +14,15 @@ RUN apt-get update && \
 # Install KVM kernel module and required tools
 RUN apt-get update && \
     apt-get install -y qemu-kvm && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* && \
+    # Create kvm group if it doesn't exist
+    groupadd -f kvm
 
 # Create kiln user and group
 RUN useradd -M kiln && \
-    usermod -aG kvm kiln
+    usermod -aG kvm kiln && \
+    # Verify group membership
+    groups kiln | grep kvm
 
 # Install Firecracker
 RUN curl -Lo firecracker https://github.com/firecracker-microvm/firecracker/releases/download/v1.5.0/firecracker-v1.5.0-x86_64 && \
