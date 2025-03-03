@@ -25,9 +25,17 @@ RUN mkdir -p /dev && \
     chmod 666 /dev/kvm
 
 # Install Firecracker
-RUN curl -Lo firecracker https://github.com/firecracker-microvm/firecracker/releases/download/v1.5.0/firecracker-v1.5.0-x86_64 && \
+RUN ARCH="x86_64" && \
+    RELEASE_URL="https://github.com/firecracker-microvm/firecracker/releases" && \
+    LATEST_RELEASE_TAG=$(curl -s ${RELEASE_URL}/latest | grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+' | head -1) && \
+    DOWNLOAD_URL="${RELEASE_URL}/download/${LATEST_RELEASE_TAG}/firecracker-${LATEST_RELEASE_TAG}-${ARCH}" && \
+    echo "Downloading Firecracker from: ${DOWNLOAD_URL}" && \
+    curl -L -o firecracker "${DOWNLOAD_URL}" && \
+    echo "Verifying Firecracker binary..." && \
     chmod +x firecracker && \
-    mv firecracker /usr/local/bin/
+    ./firecracker --version && \
+    mv firecracker /usr/local/bin/ && \
+    echo "Firecracker installation completed successfully"
 
 # Set up Firecracker directories and chroot requirements
 RUN mkdir -p /var/lib/firecracker/{kernels,rootfs,images} && \
