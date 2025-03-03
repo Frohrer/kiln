@@ -31,6 +31,7 @@ services:
             - ./data/kiln/packages:/kiln/packages
             - kernel-data:/var/lib/firecracker/kernels
             - rootfs-data:/var/lib/firecracker/rootfs
+            - firecracker-images:/var/lib/firecracker/images
         environment:
             - kiln_DISABLE_NETWORKING=false
             - kiln_RUN_TIMEOUT=300000
@@ -77,4 +78,6 @@ volumes:
     kernel-data:
         driver: local
     rootfs-data:
+        driver: local
+    firecracker-images:
         driver: local
