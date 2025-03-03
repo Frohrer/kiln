@@ -302,15 +302,40 @@ class FirecrackerService {
                         throw new Error('Image file does not exist after build');
                     }
 
-                    // Register the runtime
-                    logger.debug(`Loading package from ${imagePath}`);
-                    runtime.load_package(imagePath);
-
-                    return {
-                        success: true,
-                        imageId,
-                        path: imagePath
-                    };
+                    // Mount the image again to verify the manifest
+                    const verifyMountPoint = `${mountPoint}-verify`;
+                    try {
+                        execSync(`mkdir -p ${verifyMountPoint}`);
+                        execSync(`mount -o loop ${imagePath} ${verifyMountPoint}`);
+                        
+                        // Check if manifest exists in the mounted image
+                        const verifyManifestPath = path.join(verifyMountPoint, '.ppman-installed');
+                        if (!fs.existsSync(verifyManifestPath)) {
+                            throw new Error('Manifest file not found in mounted image');
+                        }
+                        
+                        // Read and verify manifest content
+                        const verifyContent = fs.readFileSync(verifyManifestPath, 'utf8');
+                        logger.debug(`Verified manifest in mounted image: ${verifyContent}`);
+                        
+                        // Unmount verification mount
+                        execSync('sync');
+                        execSync(`umount ${verifyMountPoint}`);
+                        execSync(`rmdir ${verifyMountPoint}`);
+                        
+                        // Now register the runtime
+                        logger.debug(`Loading package from ${imagePath}`);
+                        runtime.load_package(imagePath);
+                        
+                        return {
+                            success: true,
+                            imageId,
+                            path: imagePath
+                        };
+                    } catch (error) {
+                        logger.error(`Failed to verify manifest: ${error.message}`);
+                        throw error;
+                    }
                 } catch (error) {
                     logger.error(`Error during image build: ${error.message}`);
                     throw error;
