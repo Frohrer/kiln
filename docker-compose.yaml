@@ -39,7 +39,12 @@ services:
             - kiln_LOG_LEVEL=DEBUG
             - kiln_MAX_FILE_SIZE=500000000 # 500 MB
             - kiln_PROXY_DOMAIN=https://code-proxy.frohrer.com
+            - NODE_ENV=development
+            - PORT=3000
+            - FIRECRACKER_PATH=/usr/local/bin/firecracker
         ports:
+            - "3000:3000"
+            - "80:80"  # Firecracker API port
             - "2000:2000"
             - "2020:2020"
         networks:
@@ -49,6 +54,8 @@ services:
                 condition: service_completed_successfully
             rootfs-builder:
                 condition: service_completed_successfully
+        cap_add:
+            - ALL
     # repo:
     #     build: ./kiln/repo/.
     #     container_name: kiln_repo

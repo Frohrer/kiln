@@ -654,14 +654,9 @@ class FirecrackerService {
 
     async startVM(imageId, config) {
         const vmId = uuidv4();
-        const socketPath = `/tmp/firecracker-${vmId}.sock`;
+        const apiUrl = 'http://localhost';
 
         try {
-            // Remove socket file if it exists
-            if (fs.existsSync(socketPath)) {
-                fs.unlinkSync(socketPath);
-            }
-
             // Verify Firecracker binary exists and is executable
             if (!fs.existsSync(this.firecrackerPath)) {
                 throw new Error(`Firecracker binary not found at ${this.firecrackerPath}`);
@@ -675,25 +670,8 @@ class FirecrackerService {
 
             // Start Firecracker process
             logger.debug(`Starting Firecracker from ${this.firecrackerPath}`);
-            const firecracker = spawn(this.firecrackerPath, ['--api-sock', socketPath], {
+            const firecracker = spawn(this.firecrackerPath, ['--api-sock', '0.0.0.0:80'], {
                 stdio: ['ignore', 'pipe', 'pipe']
-            });
-
-            // Wait for the socket file to be created
-            await new Promise((resolve, reject) => {
-                const timeout = setTimeout(() => {
-                    reject(new Error('Timeout waiting for Firecracker socket'));
-                }, 5000);
-
-                const checkSocket = () => {
-                    if (fs.existsSync(socketPath)) {
-                        clearTimeout(timeout);
-                        resolve();
-                    } else {
-                        setTimeout(checkSocket, 100);
-                    }
-                };
-                checkSocket();
             });
 
             // Wait for Firecracker to be ready
@@ -738,47 +716,43 @@ class FirecrackerService {
             };
 
             // Configure the VM using Firecracker's API
-            await fetch(`http://localhost/boot-source`, {
+            await fetch(`${apiUrl}/boot-source`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify(vmConfig.boot_source),
-                socketPath
+                body: JSON.stringify(vmConfig.boot_source)
             });
 
-            await fetch(`http://localhost/drives/rootfs`, {
+            await fetch(`${apiUrl}/drives/rootfs`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify(vmConfig.drives[0]),
-                socketPath
+                body: JSON.stringify(vmConfig.drives[0])
             });
 
-            await fetch(`http://localhost/machine-config`, {
+            await fetch(`${apiUrl}/machine-config`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify(vmConfig.machine_config),
-                socketPath
+                body: JSON.stringify(vmConfig.machine_config)
             });
 
             // Start the VM
-            await fetch(`http://localhost/actions`, {
+            await fetch(`${apiUrl}/actions`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ action_type: 'InstanceStart' }),
-                socketPath
+                body: JSON.stringify({ action_type: 'InstanceStart' })
             });
 
             // Store VM instance info
             this.vmInstances.set(vmId, {
                 process: firecracker,
-                socketPath,
+                apiUrl,
                 config: vmConfig,
                 language,
                 version
@@ -786,7 +760,7 @@ class FirecrackerService {
 
             return {
                 vmId,
-                socketPath,
+                apiUrl,
                 config: vmConfig
             };
         } catch (error) {
@@ -809,14 +783,13 @@ class FirecrackerService {
             };
 
             // Send the command to Firecracker's API
-            const response = await fetch(`http://localhost/actions`, {
+            const response = await fetch(`${vm.apiUrl}/actions`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
                     'Accept': 'application/json'
                 },
-                body: JSON.stringify(execCommand),
-                socketPath: vm.socketPath
+                body: JSON.stringify(execCommand)
             });
 
             if (!response.ok) {
@@ -846,12 +819,11 @@ class FirecrackerService {
         }
 
         try {
-            const response = await fetch(`http://localhost/vm/console`, {
+            const response = await fetch(`${vm.apiUrl}/vm/console`, {
                 method: 'GET',
                 headers: {
                     'Accept': 'application/json'
-                },
-                socketPath: vm.socketPath
+                }
             });
 
             if (!response.ok) {
@@ -874,13 +846,12 @@ class FirecrackerService {
 
         try {
             // Send shutdown action to the VM
-            await fetch(`http://localhost/actions`, {
+            await fetch(`${vm.apiUrl}/actions`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({ action_type: 'SendCtrlAltDel' }),
-                socketPath: vm.socketPath
+                body: JSON.stringify({ action_type: 'SendCtrlAltDel' })
             });
 
             // Wait for the VM to shut down
@@ -889,11 +860,6 @@ class FirecrackerService {
             // Force kill if still running
             if (vm.process) {
                 vm.process.kill('SIGKILL');
-            }
-
-            // Cleanup resources
-            if (fs.existsSync(vm.socketPath)) {
-                fs.unlinkSync(vm.socketPath);
             }
 
             // Remove VM from instances map

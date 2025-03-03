@@ -45,6 +45,9 @@ RUN mkdir -p /var/lib/firecracker/{kernels,rootfs,images} && \
     chmod -R 777 /var/lib/firecracker && \
     chmod -R 777 /kiln /tmp/mount-python-3.12
 
+# Expose Firecracker API port
+EXPOSE 80
+
 WORKDIR /kiln_api
 COPY kiln/api/package.json ./
 RUN npm install
