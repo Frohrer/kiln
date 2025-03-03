@@ -207,6 +207,10 @@ class FirecrackerService {
         const baseRootfsPath = path.join(this.rootfsDir, 'base.ext4');
         const mountPoint = `/tmp/mount-${imageId}`;
         
+        logger.debug(`Building image for ${language} ${version} (normalized: ${normalizedVersion})`);
+        logger.debug(`Image path: ${imagePath}`);
+        logger.debug(`Mount point: ${mountPoint}`);
+        
         try {
             // Create a new image with more space (4GB)
             execSync(`dd if=/dev/zero of=${imagePath} bs=1M count=4096`);
@@ -248,7 +252,7 @@ class FirecrackerService {
                     // Create package manifest
                     const manifest = {
                         language,
-                        version: normalizedVersion,  // Use normalized version in manifest
+                        version,  // Use full version number for semver compatibility
                         runtime: language,
                         aliases: [],
                         limits: {
@@ -267,10 +271,39 @@ class FirecrackerService {
 
                     // Write manifest file
                     const manifestPath = path.join(mountPoint, '.ppman-installed');
-                    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
-                    execSync(`chmod 644 ${manifestPath}`);
+                    logger.debug(`Writing manifest to ${manifestPath}`);
+                    logger.debug(`Manifest content: ${JSON.stringify(manifest, null, 2)}`);
+                    
+                    try {
+                        fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+                        execSync(`chmod 644 ${manifestPath}`);
+                        execSync('sync');  // Ensure all writes are flushed to disk
+                        
+                        // Verify manifest was written
+                        if (!fs.existsSync(manifestPath)) {
+                            throw new Error('Manifest file was not created');
+                        }
+                        
+                        const writtenContent = fs.readFileSync(manifestPath, 'utf8');
+                        logger.debug(`Verified manifest content: ${writtenContent}`);
+                    } catch (error) {
+                        logger.error(`Failed to write manifest: ${error.message}`);
+                        throw error;
+                    }
+
+                    // Ensure all writes are complete before unmounting
+                    execSync('sync');
+                    
+                    // Unmount the image
+                    execSync(`umount ${mountPoint}`);
+                    
+                    // Verify the image exists
+                    if (!fs.existsSync(imagePath)) {
+                        throw new Error('Image file does not exist after build');
+                    }
 
                     // Register the runtime
+                    logger.debug(`Loading package from ${imagePath}`);
                     runtime.load_package(imagePath);
 
                     return {
@@ -278,20 +311,16 @@ class FirecrackerService {
                         imageId,
                         path: imagePath
                     };
+                } catch (error) {
+                    logger.error(`Error during image build: ${error.message}`);
+                    throw error;
                 } finally {
                     // Ensure all processes are done with the mount
-                    execSync('sync');
-                    
-                    // Try to unmount with increasing force if needed
                     try {
-                        execSync(`umount ${mountPoint}`);
+                        execSync('sync');
+                        execSync(`umount ${mountPoint} 2>/dev/null || true`);
                     } catch (error) {
-                        try {
-                            execSync(`fuser -k ${mountPoint}`);
-                            execSync(`umount -f ${mountPoint}`);
-                        } catch (error) {
-                            execSync(`umount -l ${mountPoint}`);
-                        }
+                        logger.warn(`Error during cleanup: ${error.message}`);
                     }
                 }
             } finally {
@@ -304,10 +333,14 @@ class FirecrackerService {
             }
         } catch (error) {
             // Cleanup on failure
+            logger.error(`Failed to build image: ${error.message}`);
             if (fs.existsSync(imagePath)) {
-                execSync(`rm -f ${imagePath}`);
+                try {
+                    execSync(`rm -f ${imagePath}`);
+                } catch (cleanupError) {
+                    logger.error(`Failed to cleanup image file: ${cleanupError.message}`);
+                }
             }
-            logger.error(`Failed to build image: ${error}`);
             throw error;
         }
     }
