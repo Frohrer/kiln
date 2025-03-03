@@ -32,8 +32,9 @@ RUN ARCH="x86_64" && \
     curl -L -o firecracker.tgz "${DOWNLOAD_URL}" && \
     tar xvf firecracker.tgz && \
     echo "Verifying Firecracker binary..." && \
-    chmod +x release-${VERSION}-${ARCH}/firecracker && \
-    mv release-${VERSION}-${ARCH}/firecracker /usr/local/bin/ && \
+    chmod +x release-${VERSION}-${ARCH}/firecracker-${VERSION}-${ARCH} && \
+    mv release-${VERSION}-${ARCH}/firecracker-${VERSION}-${ARCH} /usr/local/bin/firecracker && \
+    mv release-${VERSION}-${ARCH}/jailer-${VERSION}-${ARCH} /usr/local/bin/jailer && \
     rm -rf firecracker.tgz release-${VERSION}-${ARCH} && \
     echo "Firecracker installation completed successfully"
 
