@@ -13,7 +13,7 @@ const SIGNALS = {
     SIGINT: 'SIGINT'
 };
 
-const pkg_installed_file = '.ppman-installed';
+const pkg_installed_file = 'kiln-manifest';
 
 module.exports = {
     data_directories: {

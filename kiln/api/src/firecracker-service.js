@@ -269,15 +269,22 @@ class FirecrackerService {
                         }
                     };
 
-                    // Write manifest file
-                    const manifestPath = path.join(mountPoint, '.ppman-installed');
+                    // Write manifest file with new name
+                    const manifestPath = path.join(mountPoint, 'kiln-manifest');
                     logger.debug(`Writing manifest to ${manifestPath}`);
                     logger.debug(`Manifest content: ${JSON.stringify(manifest, null, 2)}`);
                     
                     try {
+                        // List directory contents before writing
+                        logger.debug(`Directory contents before writing manifest:`, fs.readdirSync(mountPoint));
+                        
+                        // Write manifest with sync to ensure it's written to disk
                         fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
                         execSync(`chmod 644 ${manifestPath}`);
                         execSync('sync');  // Ensure all writes are flushed to disk
+                        
+                        // List directory contents after writing
+                        logger.debug(`Directory contents after writing manifest:`, fs.readdirSync(mountPoint));
                         
                         // Verify manifest was written
                         if (!fs.existsSync(manifestPath)) {
@@ -286,6 +293,14 @@ class FirecrackerService {
                         
                         const writtenContent = fs.readFileSync(manifestPath, 'utf8');
                         logger.debug(`Verified manifest content: ${writtenContent}`);
+                        
+                        // Double check manifest is valid JSON
+                        try {
+                            JSON.parse(writtenContent);
+                            logger.debug('Manifest is valid JSON');
+                        } catch (e) {
+                            throw new Error(`Written manifest is not valid JSON: ${e.message}`);
+                        }
                     } catch (error) {
                         logger.error(`Failed to write manifest: ${error.message}`);
                         throw error;
@@ -308,15 +323,28 @@ class FirecrackerService {
                         execSync(`mkdir -p ${verifyMountPoint}`);
                         execSync(`mount -o loop ${imagePath} ${verifyMountPoint}`);
                         
+                        // List contents of verification mount
+                        logger.debug(`Contents of verification mount:`, fs.readdirSync(verifyMountPoint));
+                        
                         // Check if manifest exists in the mounted image
-                        const verifyManifestPath = path.join(verifyMountPoint, '.ppman-installed');
+                        const verifyManifestPath = path.join(verifyMountPoint, 'kiln-manifest');
                         if (!fs.existsSync(verifyManifestPath)) {
+                            logger.error(`Manifest not found in verification mount at ${verifyManifestPath}`);
+                            logger.debug(`Directory contents:`, fs.readdirSync(verifyMountPoint));
                             throw new Error('Manifest file not found in mounted image');
                         }
                         
                         // Read and verify manifest content
                         const verifyContent = fs.readFileSync(verifyManifestPath, 'utf8');
                         logger.debug(`Verified manifest in mounted image: ${verifyContent}`);
+                        
+                        // Verify manifest is valid JSON
+                        try {
+                            JSON.parse(verifyContent);
+                            logger.debug('Verified manifest in mounted image is valid JSON');
+                        } catch (e) {
+                            throw new Error(`Manifest in mounted image is not valid JSON: ${e.message}`);
+                        }
                         
                         // Unmount verification mount
                         execSync('sync');

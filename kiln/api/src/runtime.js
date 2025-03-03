@@ -74,11 +74,30 @@ class Runtime {
 	static load_package(pkgdir) {
 		try {
 			const pkg_json_path = path.join(pkgdir, globals.pkg_installed_file);
+			logger.debug(`Looking for manifest at: ${pkg_json_path}`);
+			logger.debug(`Manifest filename from globals: ${globals.pkg_installed_file}`);
+			
+			// Check if directory exists
+			if (!fss.existsSync(pkgdir)) {
+				logger.error(`Package directory does not exist: ${pkgdir}`);
+				throw new Error(`Package directory not found at ${pkgdir}`);
+			}
+			
+			// List contents of directory
+			try {
+				const dirContents = fss.readdirSync(pkgdir);
+				logger.debug(`Contents of ${pkgdir}:`, dirContents);
+			} catch (error) {
+				logger.error(`Failed to read directory ${pkgdir}:`, error);
+			}
+			
 			if (!fss.existsSync(pkg_json_path)) {
+				logger.error(`Manifest file not found at ${pkg_json_path}`);
 				throw new Error(`Package manifest not found at ${pkg_json_path}`);
 			}
 
 			const pkg_json = JSON.parse(fss.readFileSync(pkg_json_path));
+			logger.debug(`Successfully read manifest:`, pkg_json);
 			const version = semver.parse(pkg_json.version);
 			if (!version) {
 				throw new Error(`Invalid version ${pkg_json.version}`);
