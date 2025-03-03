@@ -792,7 +792,9 @@ class FirecrackerService {
             this.vmInstances.set(vmId, {
                 process: firecracker,
                 socketPath,
-                config: vmConfig
+                config: vmConfig,
+                language,
+                version
             });
 
             return {
@@ -802,6 +804,136 @@ class FirecrackerService {
             };
         } catch (error) {
             logger.error(`Failed to start VM: ${error}`);
+            throw error;
+        }
+    }
+
+    async executeInVM(vmId, command, options = {}) {
+        const vm = this.vmInstances.get(vmId);
+        if (!vm) {
+            throw new Error(`VM ${vmId} not found`);
+        }
+
+        try {
+            // Create a unique directory for this execution
+            const execDir = `/tmp/exec-${vmId}-${Date.now()}`;
+            fs.mkdirSync(execDir, { recursive: true });
+
+            // Write command to a script file
+            const scriptPath = path.join(execDir, 'run.sh');
+            fs.writeFileSync(scriptPath, `#!/bin/sh\n${command}`, { mode: 0o755 });
+
+            // Copy script to VM's filesystem
+            await this.copyToVM(vmId, scriptPath, '/tmp/run.sh');
+
+            // Execute the script in the VM
+            const result = await this.runCommandInVM(vmId, 'chmod +x /tmp/run.sh && /tmp/run.sh', options);
+
+            // Cleanup
+            fs.rmSync(execDir, { recursive: true, force: true });
+
+            return result;
+        } catch (error) {
+            logger.error(`Failed to execute command in VM ${vmId}: ${error}`);
+            throw error;
+        }
+    }
+
+    async copyToVM(vmId, sourcePath, destPath) {
+        const vm = this.vmInstances.get(vmId);
+        if (!vm) {
+            throw new Error(`VM ${vmId} not found`);
+        }
+
+        try {
+            // Use dd to copy file into the VM's drive
+            execSync(`dd if=${sourcePath} of=${vm.config.drives[0].path_on_host} conv=notrunc`);
+            return true;
+        } catch (error) {
+            logger.error(`Failed to copy file to VM ${vmId}: ${error}`);
+            throw error;
+        }
+    }
+
+    async runCommandInVM(vmId, command, options = {}) {
+        const vm = this.vmInstances.get(vmId);
+        if (!vm) {
+            throw new Error(`VM ${vmId} not found`);
+        }
+
+        try {
+            // Create a Unix domain socket for communication
+            const socketPath = `/tmp/vm-${vmId}-cmd.sock`;
+            const server = createConnection(socketPath);
+
+            // Send command to VM
+            server.write(JSON.stringify({
+                command,
+                options
+            }));
+
+            // Wait for response
+            const response = await new Promise((resolve, reject) => {
+                let data = '';
+                server.on('data', chunk => {
+                    data += chunk;
+                });
+                server.on('end', () => {
+                    try {
+                        resolve(JSON.parse(data));
+                    } catch (error) {
+                        reject(error);
+                    }
+                });
+                server.on('error', reject);
+            });
+
+            // Cleanup
+            server.end();
+            fs.unlinkSync(socketPath);
+
+            return response;
+        } catch (error) {
+            logger.error(`Failed to run command in VM ${vmId}: ${error}`);
+            throw error;
+        }
+    }
+
+    async stopVM(vmId) {
+        const vm = this.vmInstances.get(vmId);
+        if (!vm) {
+            throw new Error(`VM ${vmId} not found`);
+        }
+
+        try {
+            // Send shutdown signal to VM
+            vm.process.kill('SIGTERM');
+
+            // Wait for process to exit
+            await new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => {
+                    // Force kill if VM doesn't shut down gracefully
+                    vm.process.kill('SIGKILL');
+                    resolve();
+                }, 5000);
+
+                vm.process.on('exit', () => {
+                    clearTimeout(timeout);
+                    resolve();
+                });
+            });
+
+            // Cleanup resources
+            if (fs.existsSync(vm.socketPath)) {
+                fs.unlinkSync(vm.socketPath);
+            }
+
+            // Remove VM from instances map
+            this.vmInstances.delete(vmId);
+
+            return true;
+        } catch (error) {
+            logger.error(`Failed to stop VM ${vmId}: ${error}`);
             throw error;
         }
     }
