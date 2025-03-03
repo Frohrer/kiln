@@ -195,11 +195,14 @@ class FirecrackerService {
 
     async buildImage(language, version, files) {
         // Normalize version for Python (extract major.minor only)
+        let normalizedVersion = version;
         if (language === 'python') {
-            version = version.split('.').slice(0, 2).join('.');
+            // If version is already in major.minor format, use it as is
+            // Otherwise extract major.minor from the full version (e.g., 3.12.8 -> 3.12)
+            normalizedVersion = version.split('.').slice(0, 2).join('.');
         }
         
-        const imageId = `${language}-${version}`;
+        const imageId = `${language}-${normalizedVersion}`;
         const imagePath = path.join(this.imagesDir, `${imageId}.ext4`);
         const baseRootfsPath = path.join(this.rootfsDir, 'base.ext4');
         const mountPoint = `/tmp/mount-${imageId}`;
@@ -245,7 +248,7 @@ class FirecrackerService {
                     // Create package manifest
                     const manifest = {
                         language,
-                        version,
+                        version: normalizedVersion,  // Use normalized version in manifest
                         runtime: language,
                         aliases: [],
                         limits: {
@@ -482,6 +485,9 @@ class FirecrackerService {
         // Add language-specific setup
         switch(language) {
             case 'python':
+                // Extract major.minor version for binary names
+                const majorMinor = version.split('.').slice(0, 2).join('.');
+                
                 lines.push(
                     '',
                     '# Install Python build dependencies',
@@ -489,29 +495,29 @@ class FirecrackerService {
                     '',
                     '# Download and build Python from source',
                     'cd /tmp',
-                    `wget https://www.python.org/ftp/python/3.12.8/Python-3.12.8.tgz`,
-                    `tar xzf Python-3.12.8.tgz`,
-                    `cd Python-3.12.8`,
+                    `wget https://www.python.org/ftp/python/${version}/Python-${version}.tgz`,
+                    `tar xzf Python-${version}.tgz`,
+                    `cd Python-${version}`,
                     './configure --enable-optimizations',
                     'make -j$(nproc)',
                     'make install',
                     'cd ..',
-                    `rm -rf Python-3.12.8*`,
+                    `rm -rf Python-${version}*`,
                     '',
                     '# Verify Python installation',
-                    `if ! command -v python3.12 > /dev/null 2>&1; then`,
-                    `    echo "Python 3.12.8 installation failed"`,
+                    `if ! command -v python${majorMinor} > /dev/null 2>&1; then`,
+                    `    echo "Python ${version} installation failed"`,
                     '    exit 1',
                     'fi',
                     '',
                     '# Install pip',
                     'wget -q https://bootstrap.pypa.io/get-pip.py -O /tmp/get-pip.py',
-                    'python3.12 /tmp/get-pip.py',
+                    `python${majorMinor} /tmp/get-pip.py`,
                     'rm /tmp/get-pip.py',
                     '',
                     '# Create symlinks',
-                    'ln -sf /usr/local/bin/python3.12 /usr/bin/python',
-                    'ln -sf /usr/local/bin/pip3.12 /usr/bin/pip',
+                    `ln -sf /usr/local/bin/python${majorMinor} /usr/bin/python`,
+                    `ln -sf /usr/local/bin/pip${majorMinor} /usr/bin/pip`,
                     '',
                     '# Verify pip installation',
                     'if ! command -v pip > /dev/null 2>&1; then',
