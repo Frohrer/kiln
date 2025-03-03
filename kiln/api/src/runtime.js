@@ -4,6 +4,7 @@ const config = require("./config");
 const globals = require("./globals");
 const fss = require("fs");
 const path = require("path");
+const { execSync } = require("child_process");
 
 const runtimes = [];
 
@@ -73,24 +74,61 @@ class Runtime {
 
 	static load_package(pkgdir) {
 		try {
-			const pkg_json_path = path.join(pkgdir, globals.pkg_installed_file);
-			logger.debug(`Looking for manifest at: ${pkg_json_path}`);
-			logger.debug(`Manifest filename from globals: ${globals.pkg_installed_file}`);
-			
-			// Check if directory exists
-			if (!fss.existsSync(pkgdir)) {
-				logger.error(`Package directory does not exist: ${pkgdir}`);
-				throw new Error(`Package directory not found at ${pkgdir}`);
+			let pkg_json_path;
+			let tempMountPoint;
+			let needsUnmount = false;
+
+			// If this is an ext4 image, we need to mount it first
+			if (pkgdir.endsWith('.ext4')) {
+				logger.debug(`Loading package from ext4 image: ${pkgdir}`);
+				tempMountPoint = `/tmp/mount-${path.basename(pkgdir, '.ext4')}-load`;
+				
+				try {
+					// Create mount point
+					execSync(`mkdir -p ${tempMountPoint}`);
+					
+					// Mount the image
+					execSync(`mount -o loop ${pkgdir} ${tempMountPoint}`);
+					needsUnmount = true;
+					
+					// Look for manifest in the mounted image
+					pkg_json_path = path.join(tempMountPoint, globals.pkg_installed_file);
+					logger.debug(`Looking for manifest at: ${pkg_json_path}`);
+					
+					// List contents of mounted image
+					try {
+						const dirContents = fss.readdirSync(tempMountPoint);
+						logger.debug(`Contents of mounted image:`, dirContents);
+					} catch (error) {
+						logger.error(`Failed to read mounted image contents: ${error}`);
+					}
+				} catch (error) {
+					logger.error(`Failed to mount ext4 image: ${error}`);
+					if (tempMountPoint) {
+						try {
+							if (needsUnmount) {
+								execSync(`umount ${tempMountPoint}`);
+							}
+							execSync(`rmdir ${tempMountPoint}`);
+						} catch (cleanupError) {
+							logger.warn(`Failed to cleanup mount point: ${cleanupError}`);
+						}
+					}
+					throw error;
+				}
+			} else {
+				// Regular directory path
+				pkg_json_path = path.join(pkgdir, globals.pkg_installed_file);
+				logger.debug(`Looking for manifest at: ${pkg_json_path}`);
+				
+				try {
+					const dirContents = fss.readdirSync(pkgdir);
+					logger.debug(`Directory contents:`, dirContents);
+				} catch (error) {
+					logger.error(`Failed to read directory ${pkgdir}: ${error}`);
+				}
 			}
-			
-			// List contents of directory
-			try {
-				const dirContents = fss.readdirSync(pkgdir);
-				logger.debug(`Contents of ${pkgdir}:`, dirContents);
-			} catch (error) {
-				logger.error(`Failed to read directory ${pkgdir}:`, error);
-			}
-			
+
 			if (!fss.existsSync(pkg_json_path)) {
 				logger.error(`Manifest file not found at ${pkg_json_path}`);
 				throw new Error(`Package manifest not found at ${pkg_json_path}`);
@@ -98,6 +136,7 @@ class Runtime {
 
 			const pkg_json = JSON.parse(fss.readFileSync(pkg_json_path));
 			logger.debug(`Successfully read manifest:`, pkg_json);
+			
 			const version = semver.parse(pkg_json.version);
 			if (!version) {
 				throw new Error(`Invalid version ${pkg_json.version}`);
@@ -120,6 +159,16 @@ class Runtime {
 				logger.info(`Registered runtime ${runtime.language}-${runtime.version.raw}`);
 			} else {
 				logger.warn(`Skipping unavailable runtime ${runtime.language}-${runtime.version.raw}`);
+			}
+
+			// Cleanup if we mounted an ext4 image
+			if (needsUnmount && tempMountPoint) {
+				try {
+					execSync(`umount ${tempMountPoint}`);
+					execSync(`rmdir ${tempMountPoint}`);
+				} catch (error) {
+					logger.warn(`Failed to cleanup temporary mount: ${error}`);
+				}
 			}
 		} catch (error) {
 			logger.error(`Failed to load package at ${pkgdir}:`, error);
