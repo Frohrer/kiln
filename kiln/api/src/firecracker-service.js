@@ -27,6 +27,9 @@ class FirecrackerService {
             }
         });
 
+        // Register existing VM images first
+        this.registerExistingImages();
+
         // Verify kernel and base rootfs exist
         const kernelPath = path.join(this.kernelsDir, 'vmlinux');
         const baseRootfsPath = path.join(this.rootfsDir, 'base.ext4');
