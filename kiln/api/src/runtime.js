@@ -109,7 +109,7 @@ class Runtime {
 							if (needsUnmount) {
 								execSync(`umount ${tempMountPoint}`);
 							}
-							execSync(`rmdir ${tempMountPoint}`);
+							execSync(`rm -rf ${tempMountPoint}`);
 						} catch (cleanupError) {
 							logger.warn(`Failed to cleanup mount point: ${cleanupError}`);
 						}
@@ -165,7 +165,7 @@ class Runtime {
 			if (needsUnmount && tempMountPoint) {
 				try {
 					execSync(`umount ${tempMountPoint}`);
-					execSync(`rmdir ${tempMountPoint}`);
+					execSync(`rm -rf ${tempMountPoint}`);
 				} catch (error) {
 					logger.warn(`Failed to cleanup temporary mount: ${error}`);
 				}

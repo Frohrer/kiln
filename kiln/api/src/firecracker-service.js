@@ -379,7 +379,7 @@ class FirecrackerService {
             } finally {
                 // Clean up mount point
                 try {
-                    execSync(`rmdir ${mountPoint}`);
+                    execSync(`rm -rf ${mountPoint}`);
                 } catch (error) {
                     logger.warn(`Could not remove mount point: ${error.message}`);
                 }
