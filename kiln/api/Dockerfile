@@ -1,4 +1,4 @@
-FROM node:15.10.0-buster-slim
+FROM node:20-bookworm-slim
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN dpkg-reconfigure -p critical dash

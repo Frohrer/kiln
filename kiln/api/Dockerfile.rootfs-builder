@@ -1,4 +1,4 @@
-FROM debian:buster-slim
+FROM debian:bookworm-slim
 
 # Install required packages
 RUN apt-get update && \
@@ -19,7 +19,7 @@ RUN echo '#!/bin/bash' > /build.sh && \
     echo 'mkfs.ext4 base.ext4' >> /build.sh && \
     echo 'mkdir -p /mnt/rootfs' >> /build.sh && \
     echo 'mount -o loop base.ext4 /mnt/rootfs' >> /build.sh && \
-    echo 'debootstrap --variant=minbase buster /mnt/rootfs http://deb.debian.org/debian' >> /build.sh && \
+    echo 'debootstrap --variant=minbase bookworm /mnt/rootfs http://deb.debian.org/debian' >> /build.sh && \
     echo 'echo "nameserver 8.8.8.8" > /mnt/rootfs/etc/resolv.conf' >> /build.sh && \
     echo 'echo "nameserver 8.8.4.4" >> /mnt/rootfs/etc/resolv.conf' >> /build.sh && \
     echo 'chroot /mnt/rootfs apt-get clean' >> /build.sh && \
