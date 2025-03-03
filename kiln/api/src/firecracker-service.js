@@ -673,44 +673,13 @@ class FirecrackerService {
                 throw new Error(`Firecracker binary at ${this.firecrackerPath} is not executable: ${error}`);
             }
 
-            // Log binary details
-            try {
-                const stats = fs.statSync(this.firecrackerPath);
-                logger.debug(`Firecracker binary details: size=${stats.size}, mode=${stats.mode.toString(8)}, uid=${stats.uid}, gid=${stats.gid}`);
-                
-                // Try to read first few bytes to verify it's a valid binary
-                const fd = fs.openSync(this.firecrackerPath, 'r');
-                const buffer = Buffer.alloc(4);
-                fs.readSync(fd, buffer, 0, 4, 0);
-                fs.closeSync(fd);
-                
-                if (buffer[0] !== 0x7f || buffer[1] !== 0x45 || buffer[2] !== 0x4c || buffer[3] !== 0x46) {
-                    throw new Error('Firecracker binary is not a valid ELF file');
-                }
-            } catch (error) {
-                logger.error(`Error checking Firecracker binary: ${error}`);
-            }
-
-            // Start Firecracker process with full path
+            // Start Firecracker process
             logger.debug(`Starting Firecracker from ${this.firecrackerPath}`);
             const firecracker = spawn(this.firecrackerPath, ['--api-sock', socketPath], {
-                stdio: ['ignore', 'pipe', 'pipe'],
-                env: process.env
+                stdio: ['ignore', 'pipe', 'pipe']
             });
 
-            // Collect stdout and stderr
-            let stdout = '';
-            let stderr = '';
-            firecracker.stdout.on('data', (data) => {
-                stdout += data;
-                logger.debug(`Firecracker stdout: ${data}`);
-            });
-            firecracker.stderr.on('data', (data) => {
-                stderr += data;
-                logger.error(`Firecracker stderr: ${data}`);
-            });
-            
-            // Wait for the socket file to be created and available
+            // Wait for the socket file to be created
             await new Promise((resolve, reject) => {
                 const timeout = setTimeout(() => {
                     reject(new Error('Timeout waiting for Firecracker socket'));
@@ -721,27 +690,16 @@ class FirecrackerService {
                         clearTimeout(timeout);
                         resolve();
                     } else {
-                        // Check if process has exited
-                        if (firecracker.exitCode !== null) {
-                            clearTimeout(timeout);
-                            reject(new Error(`Firecracker process exited with code ${firecracker.exitCode}. Stdout: ${stdout}, Stderr: ${stderr}`));
-                        }
                         setTimeout(checkSocket, 100);
                     }
                 };
                 checkSocket();
-                
-                // Add error handler for the Firecracker process
-                firecracker.on('error', (error) => {
-                    clearTimeout(timeout);
-                    reject(new Error(`Failed to start Firecracker: ${error.message}`));
-                });
             });
 
-            // Wait a bit more for Firecracker to be ready
+            // Wait for Firecracker to be ready
             await new Promise(resolve => setTimeout(resolve, 1000));
 
-            // Handle version number differences by extracting major.minor
+            // Handle version number differences
             const versionMatch = imageId.match(/^([^-]+)-(\d+\.\d+)/);
             if (!versionMatch) {
                 throw new Error(`Invalid imageId format: ${imageId}`);
@@ -749,10 +707,8 @@ class FirecrackerService {
             const [, language, version] = versionMatch;
             const normalizedImageId = `${language}-${version}`;
 
-            // Get the actual image path
+            // Get image path
             const imagePath = path.join(this.imagesDir, `${normalizedImageId}.ext4`);
-            
-            // Verify the image exists
             if (!fs.existsSync(imagePath)) {
                 throw new Error(`Image not found at ${imagePath}`);
             }
@@ -764,7 +720,7 @@ class FirecrackerService {
             const vmConfig = {
                 boot_source: {
                     kernel_image_path: kernelPath,
-                    boot_args: "console=ttyS0 reboot=k panic=1 pci=off"
+                    boot_args: "console=ttyS0 reboot=k panic=1 pci=off init=/bin/sh"
                 },
                 drives: [
                     {
@@ -778,15 +734,46 @@ class FirecrackerService {
                     vcpu_count: 2,
                     mem_size_mib: config.memory_limit || 512,
                     smt: false
-                },
-                network_interfaces: [
-                    {
-                        iface_id: "eth0",
-                        guest_mac: "AA:FC:00:00:00:01",
-                        host_dev_name: "tap0"
-                    }
-                ]
+                }
             };
+
+            // Configure the VM using Firecracker's API
+            await fetch(`http://localhost/boot-source`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(vmConfig.boot_source),
+                socketPath
+            });
+
+            await fetch(`http://localhost/drives/rootfs`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(vmConfig.drives[0]),
+                socketPath
+            });
+
+            await fetch(`http://localhost/machine-config`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(vmConfig.machine_config),
+                socketPath
+            });
+
+            // Start the VM
+            await fetch(`http://localhost/actions`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ action_type: 'InstanceStart' }),
+                socketPath
+            });
 
             // Store VM instance info
             this.vmInstances.set(vmId, {
@@ -815,87 +802,67 @@ class FirecrackerService {
         }
 
         try {
-            // Create a unique directory for this execution
-            const execDir = `/tmp/exec-${vmId}-${Date.now()}`;
-            fs.mkdirSync(execDir, { recursive: true });
+            // Configure the command to run in the VM
+            const execCommand = {
+                action_type: "SendCtrlAltDel",
+                payload: command
+            };
 
-            // Write command to a script file
-            const scriptPath = path.join(execDir, 'run.sh');
-            fs.writeFileSync(scriptPath, `#!/bin/sh\n${command}`, { mode: 0o755 });
+            // Send the command to Firecracker's API
+            const response = await fetch(`http://localhost/actions`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
+                body: JSON.stringify(execCommand),
+                socketPath: vm.socketPath
+            });
 
-            // Copy script to VM's filesystem
-            await this.copyToVM(vmId, scriptPath, '/tmp/run.sh');
+            if (!response.ok) {
+                throw new Error(`Failed to execute command: ${response.statusText}`);
+            }
 
-            // Execute the script in the VM
-            const result = await this.runCommandInVM(vmId, 'chmod +x /tmp/run.sh && /tmp/run.sh', options);
+            // Wait for command completion
+            await new Promise(resolve => setTimeout(resolve, 1000));
 
-            // Cleanup
-            fs.rmSync(execDir, { recursive: true, force: true });
+            // Get the VM console output
+            const consoleOutput = await this.getVMConsoleOutput(vmId);
 
-            return result;
+            return {
+                success: true,
+                output: consoleOutput
+            };
         } catch (error) {
             logger.error(`Failed to execute command in VM ${vmId}: ${error}`);
             throw error;
         }
     }
 
-    async copyToVM(vmId, sourcePath, destPath) {
+    async getVMConsoleOutput(vmId) {
         const vm = this.vmInstances.get(vmId);
         if (!vm) {
             throw new Error(`VM ${vmId} not found`);
         }
 
         try {
-            // Use dd to copy file into the VM's drive
-            execSync(`dd if=${sourcePath} of=${vm.config.drives[0].path_on_host} conv=notrunc`);
-            return true;
-        } catch (error) {
-            logger.error(`Failed to copy file to VM ${vmId}: ${error}`);
-            throw error;
-        }
-    }
-
-    async runCommandInVM(vmId, command, options = {}) {
-        const vm = this.vmInstances.get(vmId);
-        if (!vm) {
-            throw new Error(`VM ${vmId} not found`);
-        }
-
-        try {
-            // Create a Unix domain socket for communication
-            const socketPath = `/tmp/vm-${vmId}-cmd.sock`;
-            const server = createConnection(socketPath);
-
-            // Send command to VM
-            server.write(JSON.stringify({
-                command,
-                options
-            }));
-
-            // Wait for response
-            const response = await new Promise((resolve, reject) => {
-                let data = '';
-                server.on('data', chunk => {
-                    data += chunk;
-                });
-                server.on('end', () => {
-                    try {
-                        resolve(JSON.parse(data));
-                    } catch (error) {
-                        reject(error);
-                    }
-                });
-                server.on('error', reject);
+            const response = await fetch(`http://localhost/vm/console`, {
+                method: 'GET',
+                headers: {
+                    'Accept': 'application/json'
+                },
+                socketPath: vm.socketPath
             });
 
-            // Cleanup
-            server.end();
-            fs.unlinkSync(socketPath);
+            if (!response.ok) {
+                throw new Error(`Failed to get console output: ${response.statusText}`);
+            }
 
-            return response;
+            const data = await response.json();
+            return data.output || '';
         } catch (error) {
-            logger.error(`Failed to run command in VM ${vmId}: ${error}`);
-            throw error;
+            logger.error(`Failed to get VM console output for ${vmId}: ${error}`);
+            return '';
         }
     }
 
@@ -906,22 +873,23 @@ class FirecrackerService {
         }
 
         try {
-            // Send shutdown signal to VM
-            vm.process.kill('SIGTERM');
-
-            // Wait for process to exit
-            await new Promise((resolve, reject) => {
-                const timeout = setTimeout(() => {
-                    // Force kill if VM doesn't shut down gracefully
-                    vm.process.kill('SIGKILL');
-                    resolve();
-                }, 5000);
-
-                vm.process.on('exit', () => {
-                    clearTimeout(timeout);
-                    resolve();
-                });
+            // Send shutdown action to the VM
+            await fetch(`http://localhost/actions`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ action_type: 'SendCtrlAltDel' }),
+                socketPath: vm.socketPath
             });
+
+            // Wait for the VM to shut down
+            await new Promise(resolve => setTimeout(resolve, 2000));
+
+            // Force kill if still running
+            if (vm.process) {
+                vm.process.kill('SIGKILL');
+            }
 
             // Cleanup resources
             if (fs.existsSync(vm.socketPath)) {
