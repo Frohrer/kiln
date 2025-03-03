@@ -26,15 +26,15 @@ RUN mkdir -p /dev && \
 
 # Install Firecracker
 RUN ARCH="x86_64" && \
-    RELEASE_URL="https://github.com/firecracker-microvm/firecracker/releases" && \
-    LATEST_RELEASE_TAG=$(curl -s ${RELEASE_URL}/latest | grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+' | head -1) && \
-    DOWNLOAD_URL="${RELEASE_URL}/download/${LATEST_RELEASE_TAG}/firecracker-${LATEST_RELEASE_TAG}-${ARCH}" && \
+    VERSION="v1.5.1" && \
+    DOWNLOAD_URL="https://github.com/firecracker-microvm/firecracker/releases/download/${VERSION}/firecracker-${VERSION}-${ARCH}.tgz" && \
     echo "Downloading Firecracker from: ${DOWNLOAD_URL}" && \
-    curl -L -o firecracker "${DOWNLOAD_URL}" && \
+    curl -L -o firecracker.tgz "${DOWNLOAD_URL}" && \
+    tar xvf firecracker.tgz && \
     echo "Verifying Firecracker binary..." && \
-    chmod +x firecracker && \
-    ./firecracker --version && \
-    mv firecracker /usr/local/bin/ && \
+    chmod +x release-${VERSION}-${ARCH}/firecracker && \
+    mv release-${VERSION}-${ARCH}/firecracker /usr/local/bin/ && \
+    rm -rf firecracker.tgz release-${VERSION}-${ARCH} && \
     echo "Firecracker installation completed successfully"
 
 # Set up Firecracker directories and chroot requirements
