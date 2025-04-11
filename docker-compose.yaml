@@ -1,50 +1,50 @@
 version: '3.2'
 services:
     api:
-        build: ./piston/api/.
-        container_name: piston_api
+        build: ./kiln/api/.
+        container_name: kiln_api
         restart: unless-stopped
         cgroup: host
         stop_grace_period: 10s
         stop_signal: SIGTERM
         privileged: true
         volumes:
-            - ./data/piston/packages:/piston/packages
+            - ./data/kiln/packages:/kiln/packages
         environment:
-            - PISTON_DISABLE_NETWORKING=false
-            - PISTON_RUN_TIMEOUT=300000
-            - PISTON_REPO_URL=http://piston_repo:8000/index
-            - PISTON_LOG_LEVEL=DEBUG
-            - PISTON_MAX_FILE_SIZE=500000000 # 500 MB
-            - PISTON_PROXY_DOMAIN=https://code-proxy.frohrer.com
+            - KILN_DISABLE_NETWORKING=false
+            - KILN_RUN_TIMEOUT=300000
+            - KILN_REPO_URL=http://kiln_repo:8000/index
+            - KILN_LOG_LEVEL=DEBUG
+            - KILN_MAX_FILE_SIZE=500000000 # 500 MB
+            - KILN_PROXY_DOMAIN=https://code-proxy.frohrer.com
         ports:
             - "2000:2000"
             - "2020:2020"
         networks:
-            - piston-network
+            - kiln-network
     repo:
-        build: ./piston/repo/.
-        container_name: piston_repo
+        build: ./kiln/repo/.
+        container_name: kiln_repo
         privileged: true
         ports:
             - "8000:8000"
         networks:
-            - piston-network
+            - kiln-network
         volumes:
-            - piston_repo_data:/app/packages
+            - kiln_repo_data:/app/packages
     ui:
         build: ./ui/
-        container_name: piston_ui
+        container_name: kiln_ui
         environment:
-            - API_BASE=http://piston_api:2000/api/v2
+            - API_BASE=http://kiln_api:2000/api/v2
         ports:
             - "8080:5000"
         networks:
-            - piston-network
+            - kiln-network
 
 networks:
-    piston-network:
+    kiln-network:
         driver: bridge
 
 volumes:
-    piston_repo_data:
+    kiln_repo_data:
