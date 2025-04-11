@@ -184,7 +184,7 @@ class Job {
             ], {
                 env: {
                     ...this.runtime.env_vars,
-                    PISTON_LANGUAGE: this.runtime.language,
+                    KILN_LANGUAGE: this.runtime.language,
                 },
                 stdio: "pipe",
             }

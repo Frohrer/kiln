@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 
 EXECUTION_PATH="$PWD"
-PISTON_PATH="$(dirname "$(realpath "$0")")"
+KILN_PATH="$(dirname "$(realpath "$0")")"
 
-cd "$PISTON_PATH"
-PISTON_ENV=$(cat .kiln_env 2> /dev/null || echo dev)
-echo "Piston path: $PISTON_PATH"
+cd "$KILN_PATH"
+KILN_ENV=$(cat .kiln_env 2> /dev/null || echo dev)
+echo "Piston path: $KILN_PATH"
 echo "exec path: $EXECUTION_PATH"
 docker_compose(){
-    if [ -f "docker-compose.$PISTON_ENV.yaml" ]; then
-        docker-compose -f "docker-compose.$PISTON_ENV.yaml" "$@"
+    if [ -f "docker-compose.$KILN_ENV.yaml" ]; then
+        docker-compose -f "docker-compose.$KILN_ENV.yaml" "$@"
     else
         docker-compose "$@"
     fi
@@ -18,7 +18,7 @@ docker_compose(){
 case $1 in
     help)
         echo "=== Piston Management ==="
-        echo "Current Environment: $PISTON_ENV"
+        echo "Current Environment: $KILN_ENV"
         echo
         echo "Commands:"
         echo " select <environment>           Select the environment"
@@ -36,7 +36,7 @@ case $1 in
         echo
         echo "Development Commands:"
 
-        if [ "$PISTON_ENV" == dev ]; then
+        if [ "$KILN_ENV" == dev ]; then
 
         echo " clean-pkgs                              Clean any package build artifacts on disk"
         echo " clean-repo                              Remove all packages from local repo"
@@ -98,6 +98,6 @@ case $1 in
     *)
         [ -d ./cli/node_modules ] || npm i > /dev/null
         cd "$EXECUTION_PATH"
-        node "${PISTON_PATH}/cli/index.js" "$@"
+        node "${KILN_PATH}/cli/index.js" "$@"
         ;;
 esac
