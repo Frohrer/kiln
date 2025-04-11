@@ -1,6 +1,6 @@
 #!/bin/bash
 
-cd /piston/packages
+cd /kiln/packages
 SERVER=1
 BUILD=1
 CI=0
@@ -46,7 +46,7 @@ do
     fi
 done
 
-cd /piston
+cd /kiln
 echo "Creating index"
 chmod +x ./mkindex.sh
 ./mkindex.sh

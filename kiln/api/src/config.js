@@ -14,8 +14,8 @@ const options = {
 		validators: [],
 	},
 	data_directory: {
-		desc: "Absolute path to store all piston related data at",
-		default: "/piston",
+		desc: "Absolute path to store all kiln related data at",
+		default: "/kiln",
 		validators: [(x) => fss.exists_sync(x) || `Directory ${x} does not exist`],
 	},
 	runner_uid_min: {
@@ -110,7 +110,7 @@ const options = {
 	},
 	repo_url: {
 		desc: "URL of repo index",
-		default: "http://piston_repo:8000/index",
+		default: "http://kiln_repo:8000/index",
 		validators: [],
 	},
 	max_concurrent_jobs: {

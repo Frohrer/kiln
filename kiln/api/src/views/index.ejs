@@ -288,7 +288,7 @@
     }
 
     // Map Piston languages to Monaco languages
-    function getMonacoLanguage(pistonLanguage) {
+    function getMonacoLanguage(kilnLanguage) {
         const languageMap = {
             'assembly': 'asm',
             'bash': 'shell',
@@ -322,7 +322,7 @@
             'typescript': 'typescript',
             // Add more mappings as needed
         };
-        return languageMap[pistonLanguage.toLowerCase()] || 'plaintext';
+        return languageMap[kilnLanguage.toLowerCase()] || 'plaintext';
     }
 
     // Function to extract dependencies from code

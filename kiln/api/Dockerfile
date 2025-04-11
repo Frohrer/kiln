@@ -21,10 +21,10 @@ RUN apt-get update && \
     libsundials-dev libpcre2-dev libcap-dev && \
     rm -rf /var/lib/apt/lists/*
 
-RUN useradd -M piston
+RUN useradd -M kiln
 
-# Create piston directory and set permissions
-RUN mkdir -p /piston && chown piston:piston /piston
+# Create kiln directory and set permissions
+RUN mkdir -p /kiln && chown kiln:kiln /kiln
 
 COPY --from=isolate /usr/local/bin/isolate /usr/local/bin
 COPY --from=isolate /usr/local/etc/isolate /usr/local/etc/isolate
@@ -34,7 +34,7 @@ RUN chmod -R 755 /usr/local/etc/isolate
 RUN mkdir -p /var/local/lib/isolate
 RUN chown -R root:root /var/local/lib/isolate
 
-WORKDIR /piston_api
+WORKDIR /kiln_api
 COPY ["package.json", "./"]
 RUN npm install
 COPY ./src ./src

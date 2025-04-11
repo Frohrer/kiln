@@ -1,5 +1,5 @@
 #!/bin/bash
-BASEURL=http://piston_repo:8000/
+BASEURL=http://kiln_repo:8000/
 
 i=0
 

@@ -16,10 +16,10 @@ else
 fi
 
 # Ensure correct permissions
-chown -R piston:piston /piston
+chown -R kiln:kiln /kiln
 
 # Set file descriptor limit
 ulimit -n 65536
 
-# Start API as piston user
-exec su -- piston -c 'node /piston_api/src'
+# Start API as kiln user
+exec su -- kiln -c 'node /kiln_api/src'

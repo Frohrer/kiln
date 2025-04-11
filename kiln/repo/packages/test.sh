@@ -13,7 +13,7 @@ do
 
 	json='{"language":"'$language'","version":"'$lang_ver'","files":[{"content":'$test_src'}]}'
 	
-	result=$(curl -s -XPOST -H "Content-Type: application/json" -d "$json" https://emkc.org/api/v2/piston/execute -H $AUTH_HEADER)
+	result=$(curl -s -XPOST -H "Content-Type: application/json" -d "$json" https://emkc.org/api/v2/kiln/execute -H $AUTH_HEADER)
 
 	echo "==$test_file: $language-$lang_ver=="
 	#jq '.'  <<<"$result"
