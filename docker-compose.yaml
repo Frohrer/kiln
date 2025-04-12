@@ -31,6 +31,9 @@ services:
             - "2020:2020"
         networks:
             - kiln-network
+        entrypoint: ["/bin/bash"]
+        tty: true
+        stdin_open: true
     repo:
         build: ./kiln/repo/.
         container_name: kiln_repo
