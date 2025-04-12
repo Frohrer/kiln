@@ -18,4 +18,15 @@ cd ..
 
 rm -rf build
 
-pip3 install numpy pillow requests pandas matplotlib scipy flask django beautifulsoup4 boto3 botocore urllib3 grpcio-status aiobotocore certifi charset-normalizer setuptools s3fs idna s3transfer typing-extensions python-dateutil fsspec packaging google-api-core six pyyaml cryptography  whoosh bcrypt passlib sympy
+# Upgrade pip first
+pip3 install --upgrade pip
+
+# Install packages in smaller groups
+pip3 install numpy pillow requests pandas matplotlib scipy
+pip3 install flask django beautifulsoup4
+pip3 install boto3 botocore urllib3 grpcio-status aiobotocore
+pip3 install certifi charset-normalizer setuptools s3fs
+pip3 install idna s3transfer typing-extensions python-dateutil
+pip3 install fsspec packaging google-api-core six
+pip3 install pyyaml cryptography whoosh
+pip3 install bcrypt passlib sympy
