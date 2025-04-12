@@ -6,6 +6,7 @@ const { processHistory } = require("./process-history");
 const EventEmitter = require("events");
 const StreamlitErrorMonitor = require("./streamlit-error-monitor");
 const { processOutputManager } = require("./process-output-manager");
+const { pipIgnore } = require("./pip_ignore");
 
 // Import the ProxyManager class (exported as a singleton in your code).
 const ProxyManager = require("./proxy-handler");
@@ -50,6 +51,15 @@ class WebEnabledJob extends Job {
         if (!this.dependencies || this.dependencies.length === 0) {
             this.logger.debug("No dependencies to install after filtering");
             return { code: 0, status: "success" };
+        }
+
+        // Filter out native Python packages
+        if (this.runtime.language === "python" || this.runtime.language === "streamlit") {
+            this.dependencies = this.dependencies.filter(dep => !pipIgnore.includes(dep));
+            if (this.dependencies.length === 0) {
+                this.logger.debug("All dependencies are native Python packages, skipping installation");
+                return { code: 0, status: "success" };
+            }
         }
 
         // Replace PIL with pillow if present
