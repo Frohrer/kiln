@@ -408,15 +408,9 @@ class Job {
             if (this.dependencies && this.dependencies.length > 0) {
                 this.logger.debug(`Installing dependencies: ${this.dependencies.join(", ")}`);
                 emit_event_bus_stage("install");
-                const installErrors = await this.installDependencies(box, event_bus);
-                if (installErrors !== undefined) {
-                    emit_event_bus_stage("execute");
-                    return {
-                        compile,
-                        run: installErrors,
-                        language: this.runtime.language,
-                        version: this.runtime.version.raw,
-                    };
+                const installResult = await this.installDependencies(box, event_bus);
+                if (installResult && installResult.code !== 0) {
+                    this.logger.warn(`Dependency installation failed, but continuing execution. Errors: ${installResult.stderr}`);
                 }
             }
 
