@@ -29,4 +29,4 @@ pip3 install certifi charset-normalizer setuptools s3fs
 pip3 install idna s3transfer typing-extensions python-dateutil
 pip3 install fsspec packaging google-api-core six
 pip3 install pyyaml cryptography whoosh
-pip3 install bcrypt passlib sympy
+pip3 install bcrypt==3.1.5 passlib sympy
