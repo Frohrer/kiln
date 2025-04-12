@@ -6,12 +6,18 @@ if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
     echo "Setting up cgroup v2"
     mkdir -p /sys/fs/cgroup/isolate
     echo "+cpu +cpuset +memory +pids" > /sys/fs/cgroup/cgroup.subtree_control
+    
+    # Set proper permissions for the isolate directory
+    chown -R kiln:kiln /sys/fs/cgroup/isolate
+    chmod -R 775 /sys/fs/cgroup/isolate
 else
     # cgroup v1 fallback
     echo "Setting up cgroup v1"
     for subsys in cpuset cpu memory pids; do
         mkdir -p /sys/fs/cgroup/$subsys/isolate
         echo 1 > /sys/fs/cgroup/$subsys/isolate/tasks
+        chown -R kiln:kiln /sys/fs/cgroup/$subsys/isolate
+        chmod -R 775 /sys/fs/cgroup/$subsys/isolate
     done
 fi
 

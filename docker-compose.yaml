@@ -8,6 +8,9 @@ services:
         stop_grace_period: 10s
         stop_signal: SIGTERM
         privileged: true
+        cap_add:
+            - SYS_ADMIN
+            - SYS_RESOURCE
         volumes:
             - ./data/kiln/packages:/kiln/packages
         environment:
