@@ -6,26 +6,48 @@ echo "Current cgroup mounts:"
 mount | grep cgroup
 echo "Cgroup controllers:"
 cat /sys/fs/cgroup/cgroup.controllers 2>/dev/null || echo "No cgroup controllers file"
+echo "Cgroup type:"
+cat /sys/fs/cgroup/cgroup.type 2>/dev/null || echo "No cgroup type file"
+echo "Cgroup subtree control:"
+cat /sys/fs/cgroup/cgroup.subtree_control 2>/dev/null || echo "No subtree control file"
 
 # Setup cgroup v2 if available, otherwise fallback to v1
 if [ -f /sys/fs/cgroup/cgroup.controllers ]; then
     # cgroup v2
     echo "Setting up cgroup v2"
+    
+    # First, ensure the isolate directory exists and has proper permissions
     mkdir -p /sys/fs/cgroup/isolate
+    chmod 777 /sys/fs/cgroup/isolate
     
-    # Try to enable controllers, but don't fail if it doesn't work
-    echo "+cpu +cpuset +memory +pids" > /sys/fs/cgroup/cgroup.subtree_control 2>/dev/null || true
+    # Try to enable controllers one by one
+    for controller in cpu cpuset memory pids; do
+        if grep -q $controller /sys/fs/cgroup/cgroup.controllers; then
+            echo "Enabling $controller controller"
+            echo "+$controller" > /sys/fs/cgroup/cgroup.subtree_control 2>/dev/null || true
+        fi
+    done
     
-    # Create initial box directory and required files
+    # Create box directory with proper permissions
     mkdir -p /sys/fs/cgroup/isolate/box-1
-    touch /sys/fs/cgroup/isolate/box-1/memory.events
-    touch /sys/fs/cgroup/isolate/box-1/memory.max
-    chmod 666 /sys/fs/cgroup/isolate/box-1/memory.events
-    chmod 666 /sys/fs/cgroup/isolate/box-1/memory.max
     chmod 777 /sys/fs/cgroup/isolate/box-1
     
-    # Set permissions
-    chmod 777 /sys/fs/cgroup/isolate 2>/dev/null || true
+    # Try to create memory files if they don't exist
+    if [ ! -f /sys/fs/cgroup/isolate/box-1/memory.events ]; then
+        echo "Creating memory.events file"
+        echo "populated 0" > /sys/fs/cgroup/isolate/box-1/memory.events 2>/dev/null || true
+        chmod 666 /sys/fs/cgroup/isolate/box-1/memory.events 2>/dev/null || true
+    fi
+    
+    if [ ! -f /sys/fs/cgroup/isolate/box-1/memory.max ]; then
+        echo "Creating memory.max file"
+        echo "max" > /sys/fs/cgroup/isolate/box-1/memory.max 2>/dev/null || true
+        chmod 666 /sys/fs/cgroup/isolate/box-1/memory.max 2>/dev/null || true
+    fi
+    
+    # Verify the setup
+    echo "Verifying cgroup setup:"
+    ls -la /sys/fs/cgroup/isolate/box-1/
 else
     # cgroup v1 fallback
     echo "Setting up cgroup v1"

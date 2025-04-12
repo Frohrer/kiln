@@ -12,6 +12,7 @@ services:
             - SYS_ADMIN
             - SYS_RESOURCE
             - DAC_OVERRIDE
+            - SYS_NICE
         security_opt:
             - apparmor:unconfined
         volumes:
