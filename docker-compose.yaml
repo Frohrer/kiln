@@ -11,8 +11,12 @@ services:
         cap_add:
             - SYS_ADMIN
             - SYS_RESOURCE
+            - DAC_OVERRIDE
+        security_opt:
+            - apparmor:unconfined
         volumes:
             - ./data/kiln/packages:/kiln/packages
+            - /sys/fs/cgroup:/sys/fs/cgroup:rw
         environment:
             - KILN_DISABLE_NETWORKING=false
             - KILN_RUN_TIMEOUT=300000
@@ -20,6 +24,7 @@ services:
             - KILN_LOG_LEVEL=DEBUG
             - KILN_MAX_FILE_SIZE=500000000 # 500 MB
             - KILN_PROXY_DOMAIN=https://code-proxy.frohrer.com
+            - KILN_DISABLE_CGROUP=false # Enable cgroups for testing
         ports:
             - "2000:2000"
             - "2020:2020"
