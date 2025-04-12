@@ -13,8 +13,11 @@ services:
             - SYS_RESOURCE
             - DAC_OVERRIDE
             - SYS_NICE
+            - NET_ADMIN
+            - IPC_LOCK
         security_opt:
             - apparmor:unconfined
+            - seccomp:unconfined
         volumes:
             - ./data/kiln/packages:/kiln/packages
             - /sys/fs/cgroup:/sys/fs/cgroup:rw
