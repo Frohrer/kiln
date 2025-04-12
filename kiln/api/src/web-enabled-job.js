@@ -164,7 +164,12 @@ class WebEnabledJob extends Job {
                     this.logger.debug(`Installing additional Python dependencies for Streamlit: ${this.dependencies.join(", ")}`);
                     const installResult = await this.installDependencies(box, localEventBus);
                     if (installResult && installResult.code !== 0) {
-                        this.logger.warn(`Dependency installation failed, but continuing execution. Errors: ${installResult.stderr}`);
+                        const error = new Error(`Failed to install dependencies`);
+                        error.stage = "install";
+                        error.code = installResult.code;
+                        error.stdout = installResult.stdout;
+                        error.stderr = installResult.stderr;
+                        throw error;
                     }
                 }
                 // Get the main file from the files array
