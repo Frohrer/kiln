@@ -468,9 +468,15 @@ class Job {
                     }
                 );
                 try {
-                    await fs.rm(box.metadata_file_path);
+                    // Check if file exists before trying to remove it
+                    const exists = await fs.access(box.metadata_file_path).then(() => true).catch(() => false);
+                    if (exists) {
+                        await fs.rm(box.metadata_file_path);
+                    } else {
+                        this.logger.debug(`Metadata file for box #${box.id} already removed or does not exist: ${box.metadata_file_path}`);
+                    }
                 } catch (e) {
-                    this.logger.error(`Failed to remove the metadata directory of box #${box.id}. Error: ${e.message}`);
+                    this.logger.error(`Failed to remove the metadata file of box #${box.id} at ${box.metadata_file_path}. Error: ${e.message}`);
                 }
             })
         );
