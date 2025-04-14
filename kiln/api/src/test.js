@@ -92,7 +92,7 @@ async function test() {
 			version: "3.11.11",
 			files: [
 				{
-					name: "app.py",
+					name: "app",
 					content: "print('Try Royksopp!')",
 				},
 			],
