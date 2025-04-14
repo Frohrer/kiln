@@ -31,11 +31,18 @@ class Job {
         this.logger = logplease.create(`job/${this.uuid}`);
 
         this.runtime = runtime;
-        this.files = files.map((file, i) => ({
-            name: file.name || `file${i}.code`,
-            content: file.content,
-            encoding: ["base64", "hex", "utf8"].includes(file.encoding) ? file.encoding : "utf8",
-        }));
+        this.files = files.map((file, i) => {
+            let name = file.name || `file${i}.code`;
+            // Ensure Python files have .py extension
+            if (this.runtime.language === "python" && !name.endsWith('.py')) {
+                name = name.endsWith('.code') ? `${name.slice(0, -5)}.py` : `${name}.py`;
+            }
+            return {
+                name,
+                content: file.content,
+                encoding: ["base64", "hex", "utf8"].includes(file.encoding) ? file.encoding : "utf8",
+            };
+        });
 
         this.args = args;
         this.stdin = stdin;
@@ -370,14 +377,6 @@ class Job {
         }
 
         this.logger.info(`Executing job runtime=${this.runtime.toString()}`);
-
-        // Ensure Python files have .py extension
-        if (this.runtime.language === "python") {
-            this.files = this.files.map(file => ({
-                ...file,
-                name: file.name.endsWith('.py') ? file.name : `${file.name}.py`
-            }));
-        }
 
         const code_files = (this.runtime.language === "file" && this.files) || this.files.filter((file) => file.encoding == "utf8");
 
