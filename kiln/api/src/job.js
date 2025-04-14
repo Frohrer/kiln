@@ -50,8 +50,6 @@ class Job {
 
         this.state = job_states.READY;
         this.dirty_boxes = [];
-
-        this.logger.info(`nDKSANDKLSANDKLASNDLKASLKDNASLKDNASLDNKLSNDSKLDSKLNDKLASNDLKSANDKLASNKLDNASKL`);
     }
 
     async forceCleanupBox(boxId) {

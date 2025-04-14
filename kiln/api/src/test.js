@@ -103,6 +103,26 @@ async function test() {
 	} catch (error) {
 		logger.error("Code execution test failed:", error);
 	}
+
+	// Test case 6: Install dependencies and execute code
+	try {
+		const result = await selfCurl("/api/v2/execute", "POST", {
+			language: "python",
+			version: "3.11.11",
+			files: [
+				{
+					name: "app",
+					content: "import requests; print(requests.get('https://www.google.com').text)",
+				},
+			],
+			stdin: "",
+			args: [""],
+			dependencies: ["requests"],
+		});
+		logger.info("Code execution test result:", result);
+	} catch (error) {
+		logger.error("Code execution test failed:", error);
+	}
 }
 
 module.exports = { test };
