@@ -371,6 +371,14 @@ class Job {
 
         this.logger.info(`Executing job runtime=${this.runtime.toString()}`);
 
+        // Ensure Python files have .py extension
+        if (this.runtime.language === "python") {
+            this.files = this.files.map(file => ({
+                ...file,
+                name: file.name.endsWith('.py') ? file.name : `${file.name}.py`
+            }));
+        }
+
         const code_files = (this.runtime.language === "file" && this.files) || this.files.filter((file) => file.encoding == "utf8");
 
         let compile;
@@ -423,7 +431,7 @@ class Job {
                 this.logger.debug(`Installing dependencies: ${this.dependencies.join(", ")}`);
                 emit_event_bus_stage("install");
                 const installErrors = await this.installDependencies(box, event_bus);
-                if (installErrors !== undefined) {
+                if (installErrors && installErrors.code !== 0) {
                     emit_event_bus_stage("execute");
                     return {
                         compile,
