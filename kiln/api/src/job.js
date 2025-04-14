@@ -31,12 +31,25 @@ class Job {
         this.logger = logplease.create(`job/${this.uuid}`);
 
         this.runtime = runtime;
+        this.logger.debug(`Initializing job with files:`, files);
         this.files = files.map((file, i) => {
-            let name = file.name || `file${i}.code`;
-            // Ensure Python files have .py extension
-            if (this.runtime.language === "python" && !name.endsWith('.py')) {
-                name = name.endsWith('.code') ? `${name.slice(0, -5)}.py` : `${name}.py`;
+            // First determine the base name
+            let name = file.name || `file${i}`;
+            
+            // Remove .code extension if it exists
+            if (name.endsWith('.code')) {
+                name = name.slice(0, -5);
             }
+            
+            // Add appropriate extension
+            if (this.runtime.language === "python") {
+                name = name.endsWith('.py') ? name : `${name}.py`;
+            } else {
+                // For non-Python files, add .code if no extension
+                name = name.includes('.') ? name : `${name}.code`;
+            }
+            
+            this.logger.debug(`Mapped file ${i}: Original name=${file.name}, Final name=${name}`);
             return {
                 name,
                 content: file.content,
@@ -132,8 +145,10 @@ class Job {
         this.logger.debug(`Creating submission files in Isolate box`);
         const submission_dir = path.join(box.dir, "submission");
         await fs.mkdir(submission_dir);
+        this.logger.debug(`Created submission directory: ${submission_dir}`);
         for (const file of this.files) {
             const file_path = path.join(submission_dir, file.name);
+            this.logger.debug(`Writing file: ${file.name} to ${file_path}`);
             const rel = path.relative(submission_dir, file_path);
 
             if (rel.startsWith("..")) throw Error(`File path "${file.name}" tries to escape parent directory: ${rel}`);
@@ -443,6 +458,7 @@ class Job {
 
             this.logger.debug("Running code");
             emit_event_bus_stage("execute");
+            this.logger.debug(`Executing file: ${code_files[0].name}`);
             run = await this.safe_call(box, "run", [code_files[0].name, ...this.args], this.timeouts.run, this.cpu_times.run, this.memory_limits.run, event_bus);
             emit_event_bus_result("execute", run);
         }
