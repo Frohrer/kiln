@@ -16,15 +16,15 @@ const runningProcesses = new Map();
 
 class WebEnabledJob extends Job {
     constructor(options) {
-        const filteredDeps = options.dependencies ? options.dependencies.filter((dep) => !dep.match(/^streamlit$/i)) : options.dependencies;
-
-        // If it's a Streamlit runtime, ensure .py extension on files
-        if (options.runtime.language === "streamlit") {
-            options.files = options.files.map((file) => ({
+        // Ensure Python files have .py extension before passing to parent constructor
+        if (options.runtime.language === "python" || options.runtime.language === "streamlit") {
+            options.files = options.files.map(file => ({
                 ...file,
-                name: file.name.endsWith(".py") ? file.name : `${file.name}.py`,
+                name: file.name.endsWith('.py') ? file.name : `${file.name}.py`
             }));
         }
+
+        const filteredDeps = options.dependencies ? options.dependencies.filter((dep) => !dep.match(/^streamlit$/i)) : options.dependencies;
 
         super({
             runtime: options.runtime,

@@ -442,7 +442,7 @@ class Job {
                 }
             }
 
-            this.logger.debug("Running code");
+            this.logger.debug(`Running code ${code_files[0].name}`);
             emit_event_bus_stage("execute");
             run = await this.safe_call(box, "run", [code_files[0].name, ...this.args], this.timeouts.run, this.cpu_times.run, this.memory_limits.run, event_bus);
             emit_event_bus_result("execute", run);
