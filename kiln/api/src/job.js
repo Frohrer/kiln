@@ -51,12 +51,7 @@ class Job {
         this.state = job_states.READY;
         this.dirty_boxes = [];
 
-        if (options.runtime.language === "python" || options.runtime.language === "streamlit") {
-            options.files = options.files.map(file => ({
-                ...file,
-                name: file.name.endsWith('.py') ? file.name : `${file.name}.py`
-            }));
-        }
+        this.logger.info(`nDKSANDKLSANDKLASNDLKASLKDNASLKDNASLDNKLSNDSKLDSKLNDKLASNDLKSANDKLASNKLDNASKL`);
     }
 
     async forceCleanupBox(boxId) {
