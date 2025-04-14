@@ -163,7 +163,8 @@ class WebEnabledJob extends Job {
                     stage = "install";
                     this.logger.debug(`Installing additional Python dependencies for Streamlit: ${this.dependencies.join(", ")}`);
                     const installResult = await this.installDependencies(box, localEventBus);
-                    if (installResult && installResult.code !== 0) {
+                    console.log(installResult);
+                    if (installResult.code !== 0) {
                         const error = new Error(`Failed to install dependencies`);
                         error.stage = "install";
                         error.code = installResult.code;
