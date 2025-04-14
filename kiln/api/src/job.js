@@ -345,7 +345,7 @@ class Job {
 
         // Run the install command inside the isolated environment
         const installResult = await this.safe_call(box, "packagemanager", args, this.timeouts.run, this.cpu_times.run, this.memory_limits.run, event_bus);
-
+        console.log(installResult);
         if (installResult.code !== 0) {
             this.logger.error(`Failed to install dependencies:`);
             this.logger.error(`stdout: ${installResult.stdout}`);
