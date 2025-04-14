@@ -86,7 +86,7 @@ class WebEnabledJob extends Job {
         this.logger.info(`Running install command for ${this.runtime.language} (using ${this.runtime.language} package manager): packagemanager ${args.join(" ")}`);
 
         const installResult = await this.safe_call(box, "packagemanager", args, this.timeouts.run, this.cpu_times.run, this.memory_limits.run, event_bus);
-        this.logger.info(installResult);
+
         if (installResult.code !== 0) {
             this.logger.error(`Failed to install dependencies:`);
             this.logger.error(`stdout: ${installResult.stdout}`);
