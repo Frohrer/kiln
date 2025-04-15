@@ -1,0 +1,25 @@
+{
+  "name": "kiln-mcp-server",
+  "version": "1.0.0",
+  "description": "Model Context Protocol server for Kiln code execution platform",
+  "main": "mcp-server.js",
+  "scripts": {
+    "start": "node mcp-server.js",
+    "dev": "nodemon mcp-server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "^1.0.0",
+    "express": "^4.18.2",
+    "logplease": "^1.2.15",
+    "nodemon": "^3.0.1"
+  },
+  "keywords": [
+    "mcp",
+    "kiln",
+    "code-execution",
+    "model-context-protocol"
+  ],
+  "author": "",
+  "license": "MIT"
+} 

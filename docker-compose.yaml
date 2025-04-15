@@ -24,6 +24,26 @@ services:
             - "2020:2020"
         networks:
             - kiln-network
+    mcp:
+        build:
+            context: ./kiln
+            dockerfile: Dockerfile.mcp
+        container_name: kiln_mcp
+        restart: unless-stopped
+        depends_on:
+            - api
+            - repo
+        environment:
+            - PORT=3000
+            - KILN_RUN_TIMEOUT=300000
+            - KILN_REPO_URL=http://kiln_repo:8000/index
+            - KILN_LOG_LEVEL=DEBUG
+            - KILN_MAX_FILE_SIZE=500000000
+            - KILN_PROXY_DOMAIN=https://code-proxy.frohrer.com
+        ports:
+            - "3000:3000"
+        networks:
+            - kiln-network
     repo:
         build: ./kiln/repo/.
         container_name: kiln_repo
