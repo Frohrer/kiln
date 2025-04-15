@@ -15,5 +15,8 @@ COPY api/ ./api/
 # Expose the port the app runs on
 EXPOSE 3000
 
+# Set environment variable to indicate Docker environment
+ENV RUNNING_IN_DOCKER=true
+
 # Command to run the application
 CMD ["node", "mcp-server.js"] 
